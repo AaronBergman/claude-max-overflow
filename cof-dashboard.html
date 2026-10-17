@@ -1,0 +1,730 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Claude router</title>
+<style>
+:root {
+  color-scheme: light;
+  --page: #f9f9f7; --surface: #fcfcfb; --surface-2: #f3f2ee;
+  --ink: #0b0b0b; --ink-2: #52514e; --muted: #898781;
+  --grid: #e1e0d9; --axis: #c3c2b7; --ring: rgba(11,11,11,0.10);
+  --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100; --s5: #e87ba4; --s6: #008300; --s7: #4a3aa7; --s8: #e34948;
+  --good: #0ca30c; --warning: #fab219; --serious: #ec835a; --critical: #d03b3b;
+  --good-ink: #006300; --track: #e9e8e3;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --page: #0d0d0d; --surface: #1a1a19; --surface-2: #232321;
+    --ink: #ffffff; --ink-2: #c3c2b7; --muted: #898781;
+    --grid: #2c2c2a; --axis: #383835; --ring: rgba(255,255,255,0.10);
+    --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --s5: #d55181; --s6: #008300; --s7: #9085e9; --s8: #e66767;
+    --good-ink: #0ca30c; --track: #2c2c2a;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--page); color: var(--ink); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+main { max-width: 1320px; margin: 0 auto; padding: 20px 24px 60px; }
+header { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin-bottom: 18px; }
+h1 { font-size: 20px; margin: 0; font-weight: 650; }
+h2 { font-size: 15px; margin: 0 0 10px; font-weight: 650; }
+h3 { font-size: 13px; margin: 0; font-weight: 650; }
+.sub { color: var(--ink-2); }
+.muted { color: var(--muted); }
+.spacer { flex: 1; }
+button { font: inherit; font-size: 13px; padding: 5px 11px; border-radius: 7px; border: 1px solid var(--ring); background: var(--surface); color: var(--ink); cursor: pointer; }
+button:hover { background: var(--surface-2); }
+button:disabled { opacity: .5; cursor: default; }
+.card { background: var(--surface); border: 1px solid var(--ring); border-radius: 12px; padding: 16px 18px; }
+.grid { display: grid; gap: 14px; }
+.g-hero { grid-template-columns: minmax(320px, 1.3fr) repeat(auto-fit, minmax(170px, 1fr)); margin-bottom: 14px; }
+.g-acct { grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); margin-bottom: 14px; }
+.g-2 { grid-template-columns: repeat(auto-fit, minmax(460px, 1fr)); margin-bottom: 14px; }
+section { margin-bottom: 14px; }
+.tile .label { color: var(--ink-2); font-size: 13px; }
+.tile .value { font-size: 30px; font-weight: 600; margin-top: 2px; }
+.tile .note { color: var(--muted); font-size: 12px; margin-top: 2px; }
+.pick .value { font-size: 40px; font-weight: 650; display: flex; align-items: center; gap: 10px; }
+.pick ul { margin: 6px 0 0; padding-left: 18px; color: var(--ink-2); font-size: 13px; }
+.swatch { display: inline-block; width: 10px; height: 10px; border-radius: 3px; flex: none; }
+.pick .swatch { width: 14px; height: 14px; border-radius: 4px; }
+.badge { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; padding: 1px 8px; border-radius: 99px; border: 1px solid var(--ring); color: var(--ink-2); white-space: nowrap; }
+.dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; flex: none; }
+.acct-head { display: flex; align-items: center; gap: 6px 8px; margin-bottom: 2px; flex-wrap: wrap; }
+.acct-head .name { font-weight: 650; font-size: 15px; }
+.acct-email { color: var(--muted); font-size: 12px; margin-bottom: 10px; overflow-wrap: anywhere; }
+.meter { margin: 9px 0; }
+.meter .row { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; }
+.meter .row .v { font-weight: 600; font-variant-numeric: tabular-nums; }
+.meter .bar { position: relative; height: 8px; background: var(--track); border-radius: 4px; margin-top: 4px; }
+.meter .fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 4px; }
+.meter .tick { position: absolute; top: -3px; bottom: -3px; width: 2px; background: var(--ink-2); opacity: .55; border-radius: 1px; }
+.meter .foot { font-size: 12px; color: var(--muted); margin-top: 3px; }
+.kv { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; font-size: 12px; margin-top: 10px; }
+.kv dt { color: var(--muted); }
+.kv dd { margin: 0; color: var(--ink-2); overflow-wrap: anywhere; }
+.acct-actions { display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap; }
+.stale-note { font-size: 12px; color: var(--ink-2); background: var(--surface-2); border-radius: 7px; padding: 5px 8px; margin: 6px 0; }
+.checks { list-style: none; margin: 0; padding: 0; }
+.checks li { display: flex; gap: 10px; padding: 7px 0; border-top: 1px solid var(--grid); }
+.checks li:first-child { border-top: 0; }
+.checks .icon { width: 18px; height: 18px; border-radius: 50%; color: #fff; font-size: 11px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; flex: none; margin-top: 1px; }
+.checks .t { font-weight: 600; }
+.checks .d { color: var(--ink-2); font-size: 12.5px; overflow-wrap: anywhere; }
+table { border-collapse: collapse; width: 100%; font-size: 12.5px; }
+th { text-align: left; color: var(--muted); font-weight: 500; padding: 4px 8px 4px 0; border-bottom: 1px solid var(--axis); white-space: nowrap; }
+td { padding: 5px 8px 5px 0; border-bottom: 1px solid var(--grid); vertical-align: top; font-variant-numeric: tabular-nums; }
+tr.thrash td { background: color-mix(in srgb, var(--serious) 12%, transparent); }
+.scroll { max-height: 360px; overflow: auto; }
+.chart { position: relative; }
+.chart svg { display: block; width: 100%; overflow: visible; }
+.chart text { fill: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.legend { display: flex; flex-wrap: wrap; gap: 12px; font-size: 12px; color: var(--ink-2); margin: 2px 0 8px; }
+.legend span { display: inline-flex; align-items: center; gap: 5px; }
+.legend .line { width: 14px; height: 2px; border-radius: 1px; display: inline-block; }
+.tip { position: absolute; pointer-events: none; background: var(--surface); border: 1px solid var(--ring); box-shadow: 0 4px 16px rgba(0,0,0,.12); border-radius: 8px; padding: 7px 9px; font-size: 12px; min-width: 150px; z-index: 5; display: none; }
+.tip .h { color: var(--muted); margin-bottom: 3px; }
+.tip .r { display: flex; align-items: center; gap: 6px; justify-content: space-between; }
+.tip .r b { font-weight: 600; font-variant-numeric: tabular-nums; }
+details { margin-top: 6px; }
+summary { cursor: pointer; color: var(--ink-2); font-size: 13px; }
+pre { font: 11.5px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--surface-2); border-radius: 8px; padding: 10px; overflow: auto; max-height: 300px; margin: 6px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.status { font-size: 12px; color: var(--muted); }
+.err { color: var(--critical); }
+a { color: var(--s1); }
+.glance { display: grid; grid-template-columns: minmax(250px, 1fr) minmax(250px, 1fr) minmax(480px, 2fr); gap: 14px; margin-bottom: 14px; }
+.glance .card { display: flex; flex-direction: column; align-items: center; text-align: center; }
+.glance h2 { margin-bottom: 4px; }
+.glance .cap { color: var(--ink-2); font-size: 12.5px; margin-bottom: 10px; }
+.glance .accts { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 10px; width: 100%; }
+.pie-cell { display: flex; flex-direction: column; align-items: center; }
+.pie-cell .who { display: flex; align-items: center; gap: 6px; font-weight: 650; font-size: 14px; margin-bottom: 6px; }
+.pie-num { font-size: 34px; font-weight: 650; line-height: 1.1; margin-top: 8px; }
+.pie-num.small { font-size: 24px; }
+.pie-note { color: var(--muted); font-size: 12px; margin-top: 2px; }
+.pie svg { display: block; overflow: visible; }
+.pie path, .pie circle { cursor: default; }
+.pie .hov { opacity: .82; }
+.section-h { font-size: 13px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); font-weight: 600; margin: 26px 0 10px; display: flex; align-items: center; gap: 10px; }
+.section-h::after { content: ""; flex: 1; height: 1px; background: var(--axis); }
+@media (max-width: 1100px) { .glance { grid-template-columns: 1fr 1fr; } .glance > :last-child { grid-column: 1 / -1; } }
+button.primary-btn { background: var(--s1); border-color: var(--s1); color: #fff; font-weight: 600; }
+button.primary-btn:hover { background: var(--s1); filter: brightness(1.08); }
+dialog { border: 1px solid var(--ring); border-radius: 14px; background: var(--surface); color: var(--ink); padding: 20px 22px; width: min(460px, 92vw); box-shadow: 0 12px 40px rgba(0,0,0,.25); }
+dialog::backdrop { background: rgba(0,0,0,.35); }
+dialog h2 { margin-bottom: 6px; }
+dialog label { display: block; font-size: 13px; color: var(--ink-2); margin: 12px 0 4px; }
+dialog input { width: 100%; font: inherit; padding: 7px 9px; border-radius: 8px; border: 1px solid var(--axis); background: var(--page); color: var(--ink); }
+dialog input:focus { outline: 2px solid var(--s1); outline-offset: 0; }
+dialog .hint { font-size: 12px; color: var(--muted); margin-top: 4px; }
+dialog .row-btns { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18px; }
+dialog .msg { font-size: 13px; margin-top: 12px; }
+code { font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--surface-2); padding: 0 4px; border-radius: 4px; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Claude router</h1>
+    <span class="sub" id="hdr-sub"></span>
+    <span class="spacer"></span>
+    <span class="status" id="status" title="Refreshes every 60 s while this tab is visible; usage is re-fetched at most every 5 min">loading…</span>
+    <button id="btn-add" class="primary-btn" title="Sign in with another Claude account and add it to the router">+ Add account</button>
+    <button id="btn-refresh" title="Re-fetch every account's usage now (bypasses the 60 s cache)">Refresh now</button>
+    <button id="btn-quit" title="Stop the dashboard server">Stop server</button>
+  </header>
+
+  <div class="glance">
+    <section class="card"><h2 id="h-total">All accounts: weekly usage</h2><div class="cap" id="cap-total">Every model, share of the combined weekly limit</div><div id="pie-total"></div></section>
+    <section class="card"><h2 id="h-fable">All accounts: Fable usage</h2><div class="cap" id="cap-fable">Fable-only weekly windows, combined</div><div id="pie-fable"></div></section>
+    <section class="card"><h2>Each account</h2><div class="cap">Weekly: % of that account's 7-day limit (every model)</div><div class="accts" id="pie-accts"></div>
+      <div class="cap" style="margin:16px 0 8px">Current 5-hour session: % of that account's rolling limit</div><div class="accts" id="pie-accts5"></div></section>
+  </div>
+
+  <div class="grid g-hero" id="hero"></div>
+
+  <div class="grid g-2">
+    <section class="card"><h2>Weekly window, last 7 days</h2><div class="sub" style="font-size:12px;margin:-6px 0 4px">% of each account's 7-day limit. Drops are weekly resets. Samples come from router launches, turn-end hook checks and this dashboard.</div><div id="ch-weekly"></div></section>
+    <section class="card"><h2>5-hour window, last 24 hours</h2><div class="sub" style="font-size:12px;margin:-6px 0 4px">% of each account's rolling session limit.</div><div id="ch-session"></div></section>
+  </div>
+
+  <div class="section-h">Details</div>
+  <section class="card" id="health-card"><h2>Router health</h2><ul class="checks" id="checks"></ul></section>
+  <div class="grid g-acct" id="accounts"></div>
+  <div class="grid g-2">
+    <section class="card"><h2>In-session hops per day</h2><div class="sub" style="font-size:12px;margin:-6px 0 4px">Conversations moved to another account, stacked by the account they moved to.</div><div id="ch-hops"></div></section>
+    <section class="card"><h2>Local Claude Code output tokens per day</h2><div class="sub" style="font-size:12px;margin:-6px 0 4px" id="tok-sub">All accounts combined (transcripts don't record which account served a turn).</div><div id="ch-tokens"></div></section>
+  </div>
+  <section class="card"><h2>Recent hops and pauses</h2><div class="scroll"><table id="t-hops"></table></div></section>
+  <section class="card"><h2>Live Claude Code sessions</h2><div class="scroll"><table id="t-sessions"></table></div></section>
+  <div class="grid g-2">
+    <section class="card"><h2>Keep-alive</h2><div id="keepalive"></div></section>
+    <section class="card"><h2>Sign-ins and mirrors</h2><div id="signins"></div></section>
+  </div>
+  <section class="card"><h2>Local token usage by model</h2><div class="scroll"><table id="t-models"></table></div></section>
+  <section class="card"><h2>Router configuration</h2><div id="config"></div></section>
+</main>
+<div class="tip" id="tip"></div>
+<dialog id="add-dlg">
+  <form id="add-form" method="dialog">
+    <h2>Add a Claude account</h2>
+    <div class="sub" style="font-size:13px">It joins the router as an overflow account. A private browser window opens for you to sign in; nothing else to do.</div>
+    <label for="add-email">Email of the Claude account</label>
+    <input id="add-email" type="email" autocomplete="off" placeholder="you@example.com">
+    <div class="hint">Pre-fills the sign-in and makes sure the right account comes back. Optional, but recommended.</div>
+    <label for="add-label">Short name</label>
+    <input id="add-label" autocomplete="off" placeholder="e.g. work" maxlength="24">
+    <div class="hint">Used in the dashboard, logs and the <code>c-&lt;name&gt;</code> shortcut. Letters, digits, _ or -.</div>
+    <div class="msg" id="add-msg"></div>
+    <div class="row-btns"><button type="button" id="add-cancel">Cancel</button><button type="submit" class="primary-btn" id="add-go">Add and sign in</button></div>
+  </form>
+</dialog>
+
+<script>
+"use strict";
+let S = null, csrf = null, busy = false;
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const SLOTS = ["--s1","--s2","--s3","--s4","--s5","--s6","--s7","--s8"];
+const acctColor = (label) => { const i = (S?.accounts || []).findIndex(a => a.label === label); return i >= 0 && i < SLOTS.length ? `var(${SLOTS[i]})` : "var(--muted)"; };
+const STATUS = { good: "--good", warning: "--warning", serious: "--serious", critical: "--critical", info: "--muted" };
+const ICON = { good: "✓", warning: "!", serious: "!", critical: "✕", info: "i" };
+
+function rel(t, now = S?.now) {
+  if (t == null) return "?";
+  let d = Math.round(t - now), fut = d > 0; d = Math.abs(d);
+  const m = Math.floor(d / 60), h = Math.floor(m / 60), dd = Math.floor(h / 24);
+  const s = dd >= 1 ? `${dd}d ${h % 24}h` : h >= 1 ? `${h}h ${m % 60}m` : m >= 1 ? `${m}m` : `${d}s`;
+  return fut ? `in ${s}` : `${s} ago`;
+}
+function abs(t, withDate) {
+  if (t == null) return "?";
+  const d = new Date(t * 1000);
+  const o = withDate ? { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" } : { weekday: "short", hour: "numeric", minute: "2-digit" };
+  return d.toLocaleString(undefined, o);
+}
+const fmtN = (n) => n >= 1e9 ? (n / 1e9).toFixed(2) + "B" : n >= 1e6 ? (n / 1e6).toFixed(1) + "M" : n >= 1e3 ? (n / 1e3).toFixed(1) + "K" : String(Math.round(n));
+const money = (minor, cur) => minor == null ? "?" : (minor / 100).toLocaleString(undefined, { style: "currency", currency: cur || "USD", maximumFractionDigits: 0 });
+
+function sevFor(pct, warnAt, critAt) {
+  if (pct >= critAt) return "critical";
+  if (pct >= warnAt) return "serious";
+  if (pct >= warnAt - 15) return "warning";
+  return "good";
+}
+
+// ---------------- data ----------------
+async function load(fresh) {
+  if (busy) return; busy = true;
+  $("status").textContent = fresh ? "fetching fresh usage…" : "updating…";
+  try {
+    const r = await fetch("/api/state" + (fresh ? "?fresh=1" : ""), { cache: "no-store" });
+    const j = await r.json();
+    if (j.error) throw new Error(j.error);
+    S = j; csrf = j.csrf;
+    render();
+    $("status").textContent = "updated " + new Date(S.now * 1000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+    $("status").classList.remove("err");
+  } catch (e) {
+    $("status").textContent = "update failed: " + e.message + " (is the server still running? rerun claude_router)";
+    $("status").classList.add("err");
+  } finally { busy = false; }
+}
+async function post(path) {
+  const r = await fetch(path, { method: "POST", headers: { "X-COF-Token": csrf } });
+  return r.json().catch(() => ({}));
+}
+
+// ---------------- rendering ----------------
+function render() {
+  $("hdr-sub").textContent = `${S.host} · ${S.claude_version || "claude ?"} · ${S.accounts.length} accounts`;
+  renderPies(); renderHero(); renderChecks(); renderAccounts();
+  renderLineChart($("ch-weekly"), "w", 7 * 86400, [{ v: num("WEEKLY_AT", 92), label: "primary switch-off" }, { v: num("FULL_AT", 97), label: "overflow full" }]);
+  renderLineChart($("ch-session"), "s", 86400, [{ v: num("SESSION_AT", 85), label: "primary switch-off" }]);
+  renderHops(); renderTokens(); renderSessions(); renderKeepalive(); renderSignins(); renderConfig();
+}
+const num = (k, d) => { const v = parseInt(S.config["CLAUDE_OVERFLOW_" + k]); return isNaN(v) ? d : v; };
+
+function renderHero() {
+  const p = S.pick, accts = S.accounts;
+  const pickLabel = p.pick === "login" ? "sign-in needed" : p.pick;
+  const steps = (p.steps || []).map(s => `<li>${esc(s)}</li>`).join("");
+  let html = `<div class="card tile pick"><div class="label">Where the next <code>claude</code> launch goes</div>
+    <div class="value">${p.pick !== "login" ? `<span class="swatch" style="background:${acctColor(p.pick)}"></span>` : ""}${esc(pickLabel)}</div>
+    <div class="sub">${esc(p.reason)}</div>${steps ? `<ul>${steps}</ul>` : ""}</div>`;
+
+  // pool headroom (usable = primary up to its switch-off thresholds, overflow up to FULL_AT)
+  const W = num("WEEKLY_AT", 92), F = num("FULL_AT", 97);
+  let wk = 0, wkMax = 0, s5 = 0, known = 0, unknown = [];
+  for (const a of accts) {
+    const cap = a.primary ? W : F;
+    wkMax += cap;
+    if (a.state === "dead") { unknown.push(a.label + " (signed out)"); continue; }
+    if (!a.pcts) { unknown.push(a.label); continue; }
+    known++;
+    wk += Math.max(0, cap - a.pcts[1]);
+    s5 += Math.max(0, (a.primary ? num("SESSION_AT", 85) : F) - a.pcts[0]);
+  }
+  const staleAny = accts.some(a => a.usage_stale);
+  html += tile("Weekly headroom, whole pool", `${(wk / 100).toFixed(2)}`, `account-weeks left, of ${(wkMax / 100).toFixed(2)} usable${staleAny ? " · includes cached values" : ""}${unknown.length ? " · unknown: " + unknown.join(", ") : ""}`);
+  html += tile("5-hour headroom right now", `${(s5 / 100).toFixed(2)}`, "account-sessions left before each account's cutoff");
+
+  // pool pace over the trailing 24h (weekly %-points consumed across all accounts)
+  const pool = S.burn.pool, perDay = pool.per_day;
+  html += tile("Pool burn, last 24 h", perDay != null ? `${perDay.toFixed(0)}%` : "n/a",
+    perDay != null ? `of one account's week per day (all accounts' weekly %-points, measured over ${pool.span_h.toFixed(1)} h of history)` : "needs a few hours of usage history; it accrues as the router runs");
+  if (perDay > 0) {
+    const days = wk / perDay;
+    const nextReset = Math.min(...accts.map(a => (a.limits || []).find(l => l.kind === "weekly_all")?.resets_at).filter(t => t && t > S.now));
+    html += tile("Runway at that pace", days >= 30 ? "30+ d" : `${days.toFixed(1)} d`, `of pooled weekly headroom, ignoring resets${isFinite(nextReset) ? `; the next weekly reset is ${rel(nextReset)} (${abs(nextReset)})` : ""}`);
+  }
+  $("hero").innerHTML = html;
+}
+function tile(label, value, note) {
+  return `<div class="card tile"><div class="label">${esc(label)}</div><div class="value">${esc(value)}</div><div class="note">${esc(note)}</div></div>`;
+}
+
+function renderChecks() {
+  const order = { critical: 0, serious: 1, warning: 2, info: 3, good: 4 };
+  const cs = [...S.health].sort((a, b) => order[a.level] - order[b.level]);
+  $("checks").innerHTML = cs.map(c => `<li><span class="icon" style="background:var(${STATUS[c.level]})" aria-label="${c.level}">${ICON[c.level]}</span>
+    <div><div class="t">${esc(c.title)} <span class="muted" style="font-weight:400;font-size:12px">${c.level}</span></div><div class="d">${esc(c.detail)}</div></div></li>`).join("");
+}
+
+function meter(title, pct, resets, ticks, sev, extraFoot) {
+  const p = Math.max(0, Math.min(100, pct ?? 0));
+  const tk = ticks.map(t => `<span class="tick" style="left:calc(${t.v}% - 1px)" title="${esc(t.label)} ${t.v}%"></span>`).join("");
+  return `<div class="meter"><div class="row"><span>${esc(title)}</span><span class="v">${pct == null ? "?" : Math.round(pct) + "%"}</span></div>
+    <div class="bar"><div class="fill" style="width:${p}%;background:var(${STATUS[sev]})"></div>${tk}</div>
+    <div class="foot">${resets ? `resets ${rel(resets)} · ${abs(resets)}` : ""}${extraFoot ? (resets ? " · " : "") + extraFoot : ""}</div></div>`;
+}
+
+function renderAccounts() {
+  const S_AT = num("SESSION_AT", 85), W_AT = num("WEEKLY_AT", 92), SC_AT = num("SCOPED_AT", 92), F = num("FULL_AT", 97), IN = num("INSESSION_AT", 95);
+  const live = {};
+  for (const p of S.sessions) if (p.kind === "interactive" || p.kind === "remote") live[p.account] = (live[p.account] || 0) + 1;
+  $("accounts").innerHTML = S.accounts.map(a => {
+    const stCol = a.state === "ok" ? "--good" : a.state === "stale" ? "--warning" : "--critical";
+    const stTxt = a.state === "ok" ? "signed in" : a.state === "stale" ? "token stale" : "signed out";
+    let body = "";
+    if (a.pcts && a.limits) {
+      const L = (k) => a.limits.filter(l => l.kind === k).sort((x, y) => (y.percent || 0) - (x.percent || 0))[0];
+      const ses = L("session"), wk = L("weekly_all"), scs = a.limits.filter(l => l.kind === "weekly_scoped");
+      const sT = a.primary ? [{ v: S_AT, label: "router switches off primary at" }, { v: IN, label: "in-session hop at" }] : [{ v: IN, label: "in-session hop at" }, { v: F, label: "counts as full at" }];
+      const wT = a.primary ? [{ v: W_AT, label: "router switches off primary at" }, { v: IN, label: "in-session hop at" }] : [{ v: IN, label: "in-session hop at" }, { v: F, label: "counts as full at" }];
+      body += meter("5-hour session", ses?.percent, ses?.resets_at, sT, sevFor(ses?.percent ?? 0, a.primary ? S_AT : IN, a.primary ? IN : F), ses?.active ? "flagged active by the API" : "");
+      body += meter("Weekly, all models", wk?.percent, wk?.resets_at, wT, sevFor(wk?.percent ?? 0, a.primary ? W_AT : IN, a.primary ? IN : F), wk?.active ? "flagged active by the API" : "");
+      for (const sc of scs) body += meter(`Weekly, ${sc.scope || "scoped"} only`, sc.percent, sc.resets_at, a.primary ? [{ v: SC_AT, label: "router switches off primary at" }, { v: IN, label: "in-session hop at" }] : [{ v: IN, label: "in-session hop at" }],
+        sevFor(sc.percent ?? 0, a.primary ? SC_AT : IN, 97), (sc.active ? "flagged active by the API · " : "") + (a.primary ? "" : "checked when it's what ran out"));
+      const ex = a.extra;
+      if (ex && ex.monthly_limit) {
+        body += meter("Extra usage (monthly credits)", ex.utilization, null, [], ex.is_enabled ? sevFor(ex.utilization ?? 0, 80, 95) : "info",
+          `${money(ex.used_credits, ex.currency)} of ${money(ex.monthly_limit, ex.currency)} · ${ex.is_enabled ? "enabled" : "off" + (ex.disabled_reason ? " (" + ex.disabled_reason.replace(/_/g, " ") + ")" : "")}`);
+      }
+      for (const o of a.other_windows || []) {
+        if (o.utilization == null || (!o.utilization && o.limit_dollars == null)) continue;
+        const dollars = o.limit_dollars != null ? `$${o.used_dollars ?? 0} of $${o.limit_dollars}` : "";
+        body += meter(`Other window: ${o.key}`, o.utilization, o.resets_at, [], "info", [dollars, "unlabeled field in the usage API"].filter(Boolean).join(" · "));
+      }
+      if (a.breakdown?.length) {
+        const parts = a.breakdown.filter(r => r.percent > 0).map(r => `${r.display_name} ${r.percent}%`).join(", ");
+        body += `<div class="muted" style="font-size:12px">This week's usage by surface: ${esc(parts || "none")}</div>`;
+      }
+    } else {
+      body += `<div class="stale-note">No usage data yet for this account.</div>`;
+    }
+    let note = "";
+    if (a.usage_stale) note = `Showing cached usage from ${rel(a.fetched_at)} (${esc(a.fetch_error || "not refreshed")}).${a.ping?.running ? " Renewing the token now via the router's ping…" : ""}`;
+    else if (a.fetch_error && a.pcts == null) note = `Usage unreadable: ${esc(a.fetch_error)}`;
+    const age = a.fetched_at && !a.usage_stale ? `live · fetched ${rel(a.fetched_at)}` : "";
+    const actions = [];
+    if (!a.primary && a.state !== "dead") actions.push(`<button data-act="refresh" data-label="${esc(a.label)}" ${a.ping?.running ? "disabled" : ""} title="Make Claude Code renew this account's token (1-token Haiku ping, same as claude-overflow refresh)">${a.ping?.running ? "Renewing…" : "Renew token"}</button>`);
+    if (!a.primary && a.state === "dead") {
+      actions.push(`<button data-act="login" data-label="${esc(a.label)}" ${a.login_inflight ? "disabled" : ""}>${a.login_inflight ? "Sign-in window open" : "Open sign-in"}</button>`);
+      actions.push(`<button data-act="remove" data-label="${esc(a.label)}" title="Unregister it from the router (its profile folder is kept)">Remove from router</button>`);
+    }
+    return `<div class="card">
+      <div class="acct-head"><span class="swatch" style="background:${acctColor(a.label)}"></span><span class="name">${esc(a.label)}</span>
+        <span class="badge"><span class="dot" style="background:var(${stCol})"></span>${stTxt}</span>
+        ${live[a.label] ? `<span class="badge">${live[a.label]} live session${live[a.label] > 1 ? "s" : ""}</span>` : ""}
+        ${S.last_launch?.label === a.label ? `<span class="badge" title="${esc(abs(S.last_launch.at, true))}">last launch</span>` : ""}</div>
+      <div class="acct-email">${esc(a.email || "")}${age ? " · " + age : ""}</div>
+      ${note ? `<div class="stale-note">${note}</div>` : ""}
+      ${body}
+      <dl class="kv">
+        <dt>access token</dt><dd>${a.expires_at ? (a.expires_at > S.now ? "expires " : "expired ") + rel(a.expires_at) : "none"}</dd>
+        <dt>refresh token</dt><dd>${a.refresh_expires_at ? "valid until " + abs(a.refresh_expires_at, true) + " (" + rel(a.refresh_expires_at) + ")" : "?"}</dd>
+        <dt>plan</dt><dd>${esc([a.subscription, a.tier].filter(Boolean).join(" · ") || "?")}</dd>
+        <dt>credentials</dt><dd>${esc(a.cred_store)}: ${esc(a.cred_source)}</dd>
+        <dt>profile</dt><dd>${esc(a.dir)}</dd>
+        ${a.ping?.result && !a.ping.running ? `<dt>last renew</dt><dd>${esc(a.ping.result)} ${a.ping.done ? rel(a.ping.done) : ""}</dd>` : ""}
+      </dl>
+      ${actions.length ? `<div class="acct-actions">${actions.join("")}</div>` : ""}
+    </div>`;
+  }).join("");
+  document.querySelectorAll("#accounts button[data-act]").forEach(b => b.onclick = async () => {
+    if (b.dataset.act === "remove" && !b.dataset.armed) {   // two clicks instead of a blocking confirm()
+      b.dataset.armed = "1"; b.textContent = `Click again to remove "${b.dataset.label}"`;
+      setTimeout(() => { if (b.isConnected) { delete b.dataset.armed; b.textContent = "Remove from router"; } }, 5000);
+      return;
+    }
+    b.disabled = true;
+    await post(`/api/${b.dataset.act}/${encodeURIComponent(b.dataset.label)}`);
+    setTimeout(() => load(false), 1500);
+  });
+}
+
+// ---------------- pies ----------------
+function arcPath(cx, cy, r, a0, a1) {  // angles in turns, 0 = 12 o'clock, clockwise
+  const P = (a) => [cx + r * Math.sin(a * 2 * Math.PI), cy - r * Math.cos(a * 2 * Math.PI)];
+  const [x0, y0] = P(a0), [x1, y1] = P(a1);
+  return `M${cx},${cy} L${x0.toFixed(2)},${y0.toFixed(2)} A${r},${r} 0 ${a1 - a0 > 0.5 ? 1 : 0} 1 ${x1.toFixed(2)},${y1.toFixed(2)} Z`;
+}
+function pie(host, slices, size) {
+  // slices: [{name, value, color, tip, faded}] in draw order (clockwise from 12); values in any unit
+  const total = slices.reduce((t, x) => t + Math.max(0, x.value), 0) || 1, r = size / 2, c = r;
+  let a = 0, marks = "";
+  const shown = slices.filter(x => x.value > 0);
+  shown.forEach((x, i) => {
+    const f = x.value / total;
+    const attrs = `data-i="${slices.indexOf(x)}" fill="${x.color}" stroke="var(--surface)" stroke-width="${shown.length > 1 ? 2 : 0}" stroke-linejoin="round"${x.faded ? ' fill-opacity=".45"' : ""}`;
+    marks += f >= 0.9999 ? `<circle cx="${c}" cy="${c}" r="${r}" ${attrs}/>` : `<path d="${arcPath(c, c, r, a, a + f)}" ${attrs}/>`;
+    a += f;
+  });
+  host.innerHTML = `<div class="pie"><svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" role="img">${marks}</svg></div>`;
+  host.querySelectorAll("[data-i]").forEach(el => {
+    const x = slices[+el.dataset.i];
+    el.addEventListener("mousemove", (e) => { el.classList.add("hov"); const b = host.getBoundingClientRect(); showTip(host, e.clientX - b.left, e.clientY - b.top, x.tip); });
+    el.addEventListener("mouseleave", () => { el.classList.remove("hov"); hideTip(); });
+  });
+}
+function pieLegend(items) {
+  return `<div class="legend" style="justify-content:center;margin-top:10px">${items.map(i => `<span><span class="swatch" style="background:${i.color}${i.faded ? ";opacity:.45" : ""}"></span>${esc(i.name)}</span>`).join("")}</div>`;
+}
+function acctUsage(a, field) {  // -> {v, known, cached}
+  if (!a.pcts) return { v: null, known: false };
+  const i = { s: 0, w: 1, sc: 2 }[field];
+  return { v: a.pcts[i], known: true, cached: !!a.usage_stale };
+}
+function renderCombinedPie(hostId, capId, field, title) {
+  const accts = S.accounts, n = accts.length;
+  const slices = [], legend = [];
+  let used = 0, unknown = [];
+  for (const a of accts) {
+    const u = acctUsage(a, field);
+    if (!u.known) { unknown.push(a.label); continue; }
+    used += u.v;
+    const scope = field === "sc" ? ((a.limits || []).find(l => l.kind === "weekly_scoped")?.scope || "Fable") + " " : "";
+    const reset = (a.limits || []).find(l => l.kind === (field === "sc" ? "weekly_scoped" : "weekly_all"))?.resets_at;
+    slices.push({ name: a.label, value: u.v, color: acctColor(a.label), faded: u.cached,
+      tip: `<div class="h">${esc(a.label)}${u.cached ? " (cached " + rel(a.fetched_at) + ")" : ""}</div><div class="r"><span>${esc(scope)}weekly used</span><b>${u.v}%</b></div><div class="r"><span>share of the combined limit</span><b>${(u.v / n).toFixed(1)}%</b></div>${reset ? `<div class="r"><span>resets</span><b>${rel(reset)}</b></div>` : ""}` });
+    legend.push({ name: `${a.label} ${u.v}%`, color: acctColor(a.label), faded: u.cached });
+  }
+  const cap = n * 100 - unknown.length * 100, left = Math.max(0, cap - used);
+  if (unknown.length) slices.push({ name: "unknown", value: unknown.length * 100, color: "var(--grid)", tip: `<div class="h">no data</div>${esc(unknown.join(", "))}` });
+  slices.push({ name: "left", value: left, color: "var(--track)", tip: `<div class="h">still available</div><div class="r"><span>${(left / 100).toFixed(2)} account-weeks</span><b>${(left / n).toFixed(0)}%</b></div>` });
+  legend.push({ name: "left", color: "var(--track)" });
+  const host = $(hostId);
+  host.innerHTML = `<div class="pie-cell"><div class="pie-slot"></div><div class="pie-num">${(used / n).toFixed(0)}% used</div>
+    <div class="pie-note">${(left / 100).toFixed(2)} of ${n} account-weeks left${unknown.length ? " · no data: " + esc(unknown.join(", ")) : ""}</div>${pieLegend(legend)}</div>`;
+  pie(host.querySelector(".pie-slot"), slices, 210);
+  if (field === "sc") {
+    const names = [...new Set(accts.flatMap(a => (a.limits || []).filter(l => l.kind === "weekly_scoped").map(l => l.scope)).filter(Boolean))];
+    if (names.length) $(capId).textContent = `${names.join(" / ")}-only weekly windows, all ${n} accounts combined`;
+  } else {
+    $(capId).textContent = `Every model, share of all ${n} accounts' combined weekly limits`;
+  }
+}
+function renderPies() {
+  const n = S.accounts.length;
+  $("h-total").textContent = `All ${n} accounts: weekly usage`;
+  const scName = [...new Set(S.accounts.flatMap(a => (a.limits || []).filter(l => l.kind === "weekly_scoped").map(l => l.scope)).filter(Boolean))].join(" / ") || "Fable";
+  $("h-fable").textContent = `All ${n} accounts: ${scName} usage`;
+  renderCombinedPie("pie-total", "cap-total", "w");
+  renderCombinedPie("pie-fable", "cap-fable", "sc");
+  const wrap = $("pie-accts");
+  wrap.innerHTML = S.accounts.map((a, i) => `<div class="pie-cell" id="pa-${i}"><div class="who"><span class="swatch" style="background:${acctColor(a.label)}"></span>${esc(a.label)}</div><div class="pie-slot"></div><div class="pie-num small"></div><div class="pie-note"></div></div>`).join("");
+  S.accounts.forEach((a, i) => {
+    const cell = $("pa-" + i), u = acctUsage(a, "w"), s5 = acctUsage(a, "s"), sc = acctUsage(a, "sc");
+    const wk = (a.limits || []).find(l => l.kind === "weekly_all");
+    if (!u.known) {
+      pie(cell.querySelector(".pie-slot"), [{ name: "unknown", value: 1, color: "var(--grid)", tip: `<div class="h">${esc(a.label)}</div>${a.state === "dead" ? "signed out" : "no usage data yet"}` }], 116);
+      cell.querySelector(".pie-num").textContent = a.state === "dead" ? "signed out" : "?";
+      return;
+    }
+    const tip = `<div class="h">${esc(a.label)} · ${esc(a.email || "")}${u.cached ? " (cached " + rel(a.fetched_at) + ")" : ""}</div>
+      <div class="r"><span>weekly, every model</span><b>${u.v}%</b></div><div class="r"><span>5-hour session</span><b>${s5.v}%</b></div>
+      <div class="r"><span>Fable-only weekly</span><b>${sc.v}%</b></div>${wk?.resets_at ? `<div class="r"><span>weekly resets</span><b>${rel(wk.resets_at)}</b></div>` : ""}`;
+    pie(cell.querySelector(".pie-slot"), [
+      { name: "used", value: u.v, color: acctColor(a.label), faded: u.cached, tip },
+      { name: "left", value: 100 - u.v, color: "var(--track)", tip }], 116);
+    cell.querySelector(".pie-num").textContent = u.v + "%";
+    cell.querySelector(".pie-note").innerHTML = `Fable ${sc.v}%${wk?.resets_at ? ` · resets ${esc(rel(wk.resets_at))}` : ""}${u.cached ? "<br>cached " + esc(rel(a.fetched_at)) : ""}`;
+  });
+  // second row: the current 5-hour session per account
+  const w5 = $("pie-accts5");
+  w5.innerHTML = S.accounts.map((a, i) => `<div class="pie-cell" id="pb-${i}"><div class="pie-slot"></div><div class="pie-num small" style="font-size:18px;margin-top:6px"></div><div class="pie-note"></div></div>`).join("");
+  S.accounts.forEach((a, i) => {
+    const cell = $("pb-" + i), u = acctUsage(a, "s");
+    const ses = (a.limits || []).find(l => l.kind === "session");
+    const tip = `<div class="h">${esc(a.label)}: 5-hour session</div>${u.known ? `<div class="r"><span>used</span><b>${u.v}%</b></div>${ses?.resets_at ? `<div class="r"><span>resets</span><b>${rel(ses.resets_at)}</b></div>` : ""}` : "no data"}`;
+    pie(cell.querySelector(".pie-slot"), u.known
+      ? [{ name: "used", value: u.v, color: acctColor(a.label), faded: u.cached, tip }, { name: "left", value: 100 - u.v, color: "var(--track)", tip }]
+      : [{ name: "unknown", value: 1, color: "var(--grid)", tip }], 76);
+    cell.querySelector(".pie-num").textContent = u.known ? `${a.label} ${u.v}%` : `${a.label} ?`;
+    cell.querySelector(".pie-note").textContent = u.known && ses?.resets_at && u.v > 0 ? "resets " + rel(ses.resets_at) : u.known && !u.v ? "idle" : "";
+  });
+}
+
+// ---------------- charts ----------------
+const tip = $("tip");
+function showTip(host, x, y, html) {
+  tip.innerHTML = html; tip.style.display = "block";
+  const r = host.getBoundingClientRect(), tw = tip.offsetWidth, th = tip.offsetHeight;
+  let left = r.left + window.scrollX + x + 14, top = r.top + window.scrollY + y - th / 2;
+  if (left + tw > window.scrollX + document.documentElement.clientWidth - 8) left = r.left + window.scrollX + x - tw - 14;
+  tip.style.left = left + "px"; tip.style.top = Math.max(window.scrollY + 4, top) + "px";
+}
+const hideTip = () => tip.style.display = "none";
+
+function renderLineChart(host, field, span, thresholds) {
+  const W = host.clientWidth || 600, H = 220, m = { l: 34, r: 12, t: 10, b: 24 };
+  const t1 = S.now, t0 = t1 - span;
+  const X = (t) => m.l + (t - t0) / (t1 - t0) * (W - m.l - m.r), Y = (v) => m.t + (1 - v / 100) * (H - m.t - m.b);
+  const series = S.accounts.map(a => ({ label: a.label, color: acctColor(a.label),
+    pts: S.history.filter(r => r.k === a.label && r.t >= t0).map(r => ({ t: r.t, v: r[field] })) }));
+  // add the current live value as the latest point
+  for (const s of series) {
+    const a = S.accounts.find(x => x.label === s.label);
+    if (a?.pcts && !a.usage_stale && a.fetched_at) s.pts.push({ t: Math.min(a.fetched_at, t1), v: a.pcts[field === "w" ? 1 : 0] });
+    s.pts.sort((p, q) => p.t - q.t);
+  }
+  const gapMax = field === "w" ? 12 * 3600 : 3 * 3600;
+  let g = "";
+  for (const v of [0, 25, 50, 75, 100]) g += `<line x1="${m.l}" x2="${W - m.r}" y1="${Y(v)}" y2="${Y(v)}" stroke="var(--grid)" stroke-width="1"/><text x="${m.l - 6}" y="${Y(v) + 4}" text-anchor="end">${v}%</text>`;
+  thresholds.forEach((th, i) => g += `<line x1="${m.l}" x2="${W - m.r}" y1="${Y(th.v)}" y2="${Y(th.v)}" stroke="var(--axis)" stroke-width="1"/><text x="${i % 2 ? m.l + 6 : W - m.r}" y="${Y(th.v) - 4}" text-anchor="${i % 2 ? "start" : "end"}">${esc(th.label)} ${th.v}%</text>`);
+  // x ticks
+  const tickStep = span > 2 * 86400 ? 86400 : 4 * 3600;
+  const d0 = new Date(t0 * 1000); d0.setMinutes(0, 0, 0); if (tickStep === 86400) d0.setHours(0);
+  for (let t = d0.getTime() / 1000 + tickStep; t < t1; t += tickStep) {
+    const lbl = tickStep === 86400 ? new Date(t * 1000).toLocaleDateString(undefined, { weekday: "short", day: "numeric" }) : new Date(t * 1000).toLocaleTimeString(undefined, { hour: "numeric" });
+    g += `<line x1="${X(t)}" x2="${X(t)}" y1="${H - m.b}" y2="${H - m.b + 4}" stroke="var(--axis)"/><text x="${X(t)}" y="${H - 6}" text-anchor="middle">${lbl}</text>`;
+  }
+  g += `<line x1="${m.l}" x2="${W - m.r}" y1="${Y(0)}" y2="${Y(0)}" stroke="var(--axis)" stroke-width="1"/>`;
+  let lines = "", dots = "";
+  for (const s of series) {
+    let d = "", prev = null;
+    s.pts.forEach((p, i) => {
+      d += (prev && p.t - prev.t <= gapMax ? "L" : "M") + X(p.t).toFixed(1) + "," + Y(p.v).toFixed(1); prev = p;
+      const nb = (q) => q && Math.abs(q.t - p.t) <= gapMax;
+      if (!nb(s.pts[i - 1]) && !nb(s.pts[i + 1])) dots += `<circle cx="${X(p.t)}" cy="${Y(p.v)}" r="3" fill="${s.color}" stroke="var(--surface)" stroke-width="1.5"/>`;
+    });
+    if (d) lines += `<path d="${d}" fill="none" stroke="${s.color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
+    const last = s.pts[s.pts.length - 1];
+    if (last) dots += `<circle cx="${X(last.t)}" cy="${Y(last.v)}" r="4" fill="${s.color}" stroke="var(--surface)" stroke-width="2"/>`;
+  }
+  const empty = series.every(s => s.pts.length === 0);
+  const legend = `<div class="legend">${series.map(s => `<span><span class="line" style="background:${s.color}"></span>${esc(s.label)}</span>`).join("")}</div>`;
+  host.innerHTML = `${legend}<div class="chart"><svg viewBox="0 0 ${W} ${H}" height="${H}">${g}${lines}${dots}
+    <line class="xh" y1="${m.t}" y2="${H - m.b}" stroke="var(--axis)" stroke-width="1" style="display:none"/>
+    <rect x="${m.l}" y="${m.t}" width="${W - m.l - m.r}" height="${H - m.t - m.b}" fill="transparent"/></svg>
+    ${empty ? `<div class="muted" style="position:absolute;inset:40% 0 0 0;text-align:center">No samples in this window yet; history accrues as the router runs.</div>` : ""}</div>`;
+  const svg = host.querySelector("svg"), xh = host.querySelector(".xh");
+  svg.addEventListener("mousemove", (e) => {
+    const r = svg.getBoundingClientRect(), px = (e.clientX - r.left) * W / r.width;
+    const t = t0 + (px - m.l) / (W - m.l - m.r) * (t1 - t0);
+    if (px < m.l || px > W - m.r) { hideTip(); xh.style.display = "none"; return; }
+    xh.setAttribute("x1", px); xh.setAttribute("x2", px); xh.style.display = "";
+    let rows = "";
+    for (const s of series) {
+      let best = null;
+      for (const p of s.pts) if (p.t <= t && (!best || p.t > best.t)) best = p;
+      if (best && t - best.t <= gapMax) rows += `<div class="r"><span><span class="swatch" style="background:${s.color}"></span> ${esc(s.label)}</span><b>${best.v}%</b></div>`;
+    }
+    showTip(host, e.clientX - r.left, e.clientY - r.top, `<div class="h">${abs(t, true)}</div>${rows || '<span class="muted">no sample</span>'}`);
+  });
+  svg.addEventListener("mouseleave", () => { hideTip(); xh.style.display = "none"; });
+}
+
+function columnChart(host, cats, stacks, opts) {
+  // cats: [{key, label}], stacks: [{name, color, values: {key: n}}]
+  const W = host.clientWidth || 600, H = opts.height || 200, m = { l: 44, r: 8, t: 12, b: 24 };
+  const totals = cats.map(c => stacks.reduce((s, st) => s + (st.values[c.key] || 0), 0));
+  const maxV = Math.max(1, ...totals);
+  const step = niceStep(maxV / 4), top = Math.ceil(maxV / step) * step;
+  const Y = (v) => m.t + (1 - v / top) * (H - m.t - m.b);
+  const band = (W - m.l - m.r) / cats.length, bw = Math.min(24, band * 0.6);
+  let g = "";
+  for (let v = 0; v <= top + 1e-9; v += step) g += `<line x1="${m.l}" x2="${W - m.r}" y1="${Y(v)}" y2="${Y(v)}" stroke="var(--grid)"/><text x="${m.l - 6}" y="${Y(v) + 4}" text-anchor="end">${opts.fmt(v)}</text>`;
+  let bars = "";
+  cats.forEach((c, i) => {
+    const x = m.l + i * band + (band - bw) / 2;
+    let acc = 0;
+    const segs = stacks.map(st => ({ st, v: st.values[c.key] || 0 })).filter(s => s.v > 0);
+    segs.forEach((s, j) => {
+      const y0 = Y(acc), y1 = Y(acc + s.v); acc += s.v;
+      const h = Math.max(0, y0 - y1 - (j > 0 ? 2 : 0));
+      const isTop = j === segs.length - 1, r = isTop ? Math.min(4, h) : 0;
+      const yTop = y1, yBot = y1 + h;
+      bars += isTop
+        ? `<path d="M${x},${yBot} V${yTop + r} Q${x},${yTop} ${x + r},${yTop} H${x + bw - r} Q${x + bw},${yTop} ${x + bw},${yTop + r} V${yBot} Z" fill="${s.st.color}"/>`
+        : `<rect x="${x}" y="${yTop}" width="${bw}" height="${h}" fill="${s.st.color}"/>`;
+    });
+    if (i % Math.ceil(cats.length / 10) === 0 || i === cats.length - 1) g += `<text x="${x + bw / 2}" y="${H - 6}" text-anchor="middle">${esc(c.label)}</text>`;
+    if (totals[i] > 0 && (i === cats.length - 1 || totals[i] === maxV)) bars += `<text x="${x + bw / 2}" y="${Y(totals[i]) - 4}" text-anchor="middle" style="fill:var(--ink-2)">${opts.fmt(totals[i])}</text>`;
+  });
+  g += `<line x1="${m.l}" x2="${W - m.r}" y1="${Y(0)}" y2="${Y(0)}" stroke="var(--axis)"/>`;
+  const legend = stacks.length > 1 ? `<div class="legend">${stacks.map(s => `<span><span class="swatch" style="background:${s.color}"></span>${esc(s.name)}</span>`).join("")}</div>` : "";
+  host.innerHTML = `${legend}<div class="chart"><svg viewBox="0 0 ${W} ${H}" height="${H}">${g}${bars}<rect class="hit" x="${m.l}" y="${m.t}" width="${W - m.l - m.r}" height="${H - m.t - m.b}" fill="transparent"/></svg></div>`;
+  const svg = host.querySelector("svg");
+  svg.addEventListener("mousemove", (e) => {
+    const r = svg.getBoundingClientRect(), px = (e.clientX - r.left) * W / r.width;
+    const i = Math.floor((px - m.l) / band);
+    if (i < 0 || i >= cats.length) return hideTip();
+    const c = cats[i];
+    const rows = stacks.filter(s => s.values[c.key]).map(s => `<div class="r"><span><span class="swatch" style="background:${s.color}"></span> ${esc(s.name)}</span><b>${opts.fmt(s.values[c.key])}</b></div>`).join("");
+    showTip(host, e.clientX - r.left, e.clientY - r.top, `<div class="h">${esc(c.full || c.label)}${stacks.length > 1 ? " · total " + opts.fmt(totals[i]) : ""}</div>${rows || '<span class="muted">none</span>'}${opts.extra ? opts.extra(c) : ""}`);
+  });
+  svg.addEventListener("mouseleave", hideTip);
+}
+function niceStep(x) { const p = Math.pow(10, Math.floor(Math.log10(Math.max(x, 1e-9)))); const f = x / p; return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 5 ? 5 : 10) * p; }
+function lastDays(n) {
+  const out = [];
+  for (let i = n - 1; i >= 0; i--) {
+    const d = new Date(S.now * 1000 - i * 86400000);
+    const key = d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+    out.push({ key, label: d.toLocaleDateString(undefined, { month: "numeric", day: "numeric" }), full: d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" }) });
+  }
+  return out;
+}
+const dayKey = (t) => { const d = new Date(t * 1000); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); };
+
+function renderHops() {
+  const cats = lastDays(14);
+  const sw = S.hops.filter(h => h.kind === "switch");
+  const stacks = S.accounts.map(a => ({ name: "to " + a.label, color: acctColor(a.label), values: {} }));
+  for (const h of sw) { const st = stacks.find(s => s.name === "to " + h.to); if (st) st.values[dayKey(h.t)] = (st.values[dayKey(h.t)] || 0) + 1; }
+  const paused = {}; for (const h of S.hops) if (h.kind === "paused") paused[dayKey(h.t)] = (paused[dayKey(h.t)] || 0) + 1;
+  columnChart($("ch-hops"), cats, stacks.filter(s => Object.keys(s.values).length), { fmt: (v) => String(Math.round(v)), height: 200,
+    extra: (c) => paused[c.key] ? `<div class="r"><span>paused (no headroom)</span><b>${paused[c.key]}</b></div>` : "" });
+  if (!sw.length) $("ch-hops").insertAdjacentHTML("beforeend", `<div class="muted">No hops logged yet.</div>`);
+  const rows = [...S.hops].reverse().slice(0, 120).map(h => `<tr class="${h.thrash ? "thrash" : ""}"><td>${esc(abs(h.t, true))}</td>
+    <td><span class="swatch" style="background:${acctColor(h.from)}"></span> ${esc(h.from)}</td>
+    <td>${h.to ? `<span class="swatch" style="background:${acctColor(h.to)}"></span> ${esc(h.to)}` : esc(h.kind)}</td>
+    <td>${h.trigger === "wall" ? "hit the limit" + (h.error ? ` (${esc(h.error)})` : "") : "near limit, clean turn end"}</td>
+    <td class="muted">${esc(h.reason)}${h.thrash ? " · <b>ping-pong</b>" : ""}</td></tr>`).join("");
+  $("t-hops").innerHTML = `<tr><th>when</th><th>from</th><th>to</th><th>trigger</th><th>detail</th></tr>${rows || '<tr><td colspan="5" class="muted">none</td></tr>'}`;
+}
+
+function renderTokens() {
+  const T = S.tokens;
+  if (!T.data) { $("ch-tokens").innerHTML = `<div class="muted">${T.error ? "scan failed: " + esc(T.error) : "Scanning transcripts in the background (first run takes a minute)…"}</div>`; $("t-models").innerHTML = ""; return; }
+  const cats = lastDays(T.data.window_days);
+  const vals = {}, byModel = {};
+  for (const [day, models] of Object.entries(T.data.days)) for (const [model, v] of Object.entries(models)) {
+    vals[day] = (vals[day] || 0) + v[3];
+    const b = byModel[model] || (byModel[model] = [0, 0, 0, 0, 0]); for (let i = 0; i < 5; i++) b[i] += v[i];
+  }
+  columnChart($("ch-tokens"), cats, [{ name: "output tokens", color: "var(--s7)", values: vals }], { fmt: fmtN, height: 200,
+    extra: (c) => { const ms = T.data.days[c.key] || {}; return Object.entries(ms).sort((a, b) => b[1][3] - a[1][3]).slice(0, 5).map(([m, v]) => `<div class="r"><span class="muted">${esc(m)}</span><b>${fmtN(v[3])}</b></div>`).join("") + (T.data.sessions[c.key] ? `<div class="r"><span class="muted">transcripts touched</span><b>${T.data.sessions[c.key]}</b></div>` : ""); } });
+  $("tok-sub").textContent = `All accounts combined, last ${T.data.window_days} days (transcripts don't record which account served a turn). ${T.data.files} transcript files; scanned ${rel(T.done_at)}.`;
+  const rows = Object.entries(byModel).sort((a, b) => b[1][3] - a[1][3]).map(([m, v]) => `<tr><td>${esc(m)}</td><td>${fmtN(v[4])}</td><td>${fmtN(v[0])}</td><td>${fmtN(v[1])}</td><td>${fmtN(v[2])}</td><td><b>${fmtN(v[3])}</b></td></tr>`).join("");
+  $("t-models").innerHTML = `<tr><th>model (last ${T.data.window_days} days)</th><th>API calls</th><th>input</th><th>cache write</th><th>cache read</th><th>output</th></tr>${rows}`;
+}
+
+function renderSessions() {
+  const kinds = { interactive: "interactive", remote: "Remote Control session", "rc-daemon": "Remote Control supervisor", print: "headless (-p)" };
+  const rows = S.sessions.map(p => `<tr><td>${p.pid}</td><td style="white-space:nowrap"><span class="swatch" style="background:${acctColor(p.account)}"></span> ${esc(p.account)}</td>
+    <td style="white-space:nowrap">${p.kind !== "interactive" && p.kind !== "remote" ? "<span class='muted'>n/a</span>" : p.managed ? "managed (can hop)" : "<span class='muted'>unmanaged (stays put)</span>"}${p.paused ? ` · <b>paused</b>: ${esc(p.paused.split("\n").join(" "))}` : ""}</td>
+    <td>${esc(kinds[p.kind] || p.kind)}</td><td>${esc(p.cwd || "")}</td><td>${p.started ? rel(p.started) : ""}</td><td class="muted">${esc(p.args)}</td></tr>`).join("");
+  $("t-sessions").innerHTML = `<tr><th>pid</th><th>account</th><th>router</th><th>kind</th><th>cwd</th><th>started</th><th>args</th></tr>${rows || '<tr><td colspan="7" class="muted">none running</td></tr>'}`;
+}
+
+function renderKeepalive() {
+  const k = S.keepalive.launchd, log = S.keepalive.log;
+  const last = log.length ? log[log.length - 1].t : null;
+  const next = last && k.interval_s ? last + k.interval_s : null;
+  let html = k.installed
+    ? `<div>launchd job <code>com.claude-max-overflow.keepalive</code>: ${esc(k.state || "?")}, every ${Math.round((k.interval_s || 0) / 3600)} h, ${esc(k.runs)} runs, last exit ${esc(k.last_exit)}</div>
+       <div class="muted" style="font-size:12px">last run ${last ? rel(last) + " (" + abs(last) + ")" : "never"}${next ? ` · next about ${rel(next)} (launchd runs missed intervals after sleep)` : ""}</div>`
+    : `<div class="err">Not installed. Run <code>claude-overflow install-keepalive</code>.</div>`;
+  const by = {};
+  for (const r of log) by[r.label] = r;
+  html += `<table style="margin-top:8px"><tr><th>account</th><th>last result</th><th>when</th></tr>${Object.values(by).map(r => `<tr><td><span class="swatch" style="background:${acctColor(r.label)}"></span> ${esc(r.label)}</td><td>${esc(r.msg)}</td><td>${rel(r.t)}</td></tr>`).join("")}</table>`;
+  html += `<details><summary>keepalive.log (last ${log.length})</summary><pre>${esc(log.map(r => new Date(r.t * 1000).toLocaleString() + "  " + r.label + ": " + r.msg).join("\n"))}</pre></details>`;
+  $("keepalive").innerHTML = html;
+}
+
+function renderSignins() {
+  const ll = S.login_log, mb = S.login_browser_log, mi = S.mirrors;
+  let html = `<div class="muted" style="font-size:12px">Automatic sign-in: ${esc(S.config.CLAUDE_OVERFLOW_AUTOLOGIN === "0" ? "off" : S.config.CLAUDE_OVERFLOW_AUTOLOGIN === "ask" ? "ask first" : "on")} · retry every ${esc(S.config.CLAUDE_OVERFLOW_LOGIN_RETRY_HOURS)} h · browser ${esc(S.config.CLAUDE_OVERFLOW_LOGIN_BROWSER)}</div>`;
+  html += `<details ${ll.length ? "" : ""}><summary>login.log (${ll.length ? "last " + ll.length + " lines" : "empty: no background sign-ins yet"})</summary><pre>${esc(ll.join("\n") || "(empty)")}</pre></details>`;
+  html += `<details><summary>sign-in pages opened (${mb.length})</summary><pre>${esc(mb.join("\n") || "(none)")}</pre></details>`;
+  html += `<h3 style="margin-top:12px">Mirrors into the primary's claude.ai (${mi.length})</h3>`;
+  html += `<table><tr><th>when</th><th>via</th><th>title</th></tr>${[...mi].reverse().slice(0, 12).map(m => `<tr><td>${esc(m.when.replace("T", " "))}</td><td>${esc(m.label)}</td><td><a href="${esc(m.url)}" target="_blank" rel="noopener">${esc(m.title.replace(/<[^>]*>/g, "").trim() || m.session)}</a></td></tr>`).join("") || '<tr><td colspan="3" class="muted">none</td></tr>'}</table>`;
+  $("signins").innerHTML = html;
+}
+
+function renderConfig() {
+  const c = S.config;
+  const rows = Object.keys(c).sort().map(k => `<tr><td><code>${esc(k)}</code></td><td>${esc(c[k])}</td></tr>`).join("");
+  $("config").innerHTML = `<div class="muted" style="font-size:12px;margin-bottom:6px">Effective values after <code>~/.claude-overflow/config.sh</code>. Launch picks: primary until 5h ≥ ${num("SESSION_AT", 85)}% or weekly ≥ ${num("WEEKLY_AT", 92)}% or scoped ≥ ${num("SCOPED_AT", 92)}%, then the first overflow account under ${num("FULL_AT", 97)}% (5h and weekly). Live sessions hop at ${num("INSESSION_AT", 95)}% of any window${c.CLAUDE_OVERFLOW_INSESSION_PROACTIVE === "1" ? "" : " (disabled: wall only)"} or on a rate-limit error.</div>
+    <details><summary>all variables (${Object.keys(c).length})</summary><table>${rows}</table></details>`;
+}
+
+// ---------------- add account ----------------
+const dlg = $("add-dlg");
+let labelTouched = false;
+function suggestLabel(email) {
+  const m = /^([^@]+)@([^@]+)$/.exec(email.trim().toLowerCase());
+  if (!m) return "";
+  const common = /^(gmail|googlemail|outlook|hotmail|live|icloud|me|yahoo|proton|protonmail|pm|fastmail|hey|aol)\./;
+  let base = common.test(m[2]) ? m[1] : m[2].split(".")[0];
+  base = base.replace(/[^a-z0-9_-]/g, "").slice(0, 16) || "acct";
+  const taken = new Set((S?.accounts || []).map(a => a.label.toLowerCase()));
+  let cand = base, i = 2;
+  while (taken.has(cand) || ["primary", "login", "all"].includes(cand)) cand = base + i++;
+  return cand;
+}
+$("btn-add").onclick = () => {
+  labelTouched = false; $("add-email").value = ""; $("add-label").value = ""; $("add-msg").textContent = "";
+  $("add-go").disabled = false; dlg.showModal(); $("add-email").focus();
+};
+$("add-cancel").onclick = () => dlg.close();
+$("add-email").oninput = () => { if (!labelTouched) $("add-label").value = suggestLabel($("add-email").value); };
+$("add-label").oninput = () => { labelTouched = true; };
+$("add-form").onsubmit = async (e) => {
+  e.preventDefault();
+  const email = $("add-email").value.trim(), label = $("add-label").value.trim();
+  const msg = $("add-msg");
+  if (!label) { msg.innerHTML = `<span class="err">Give it a short name.</span>`; return; }
+  $("add-go").disabled = true; msg.textContent = "Registering…";
+  try {
+    const r = await fetch("/api/add", { method: "POST", headers: { "X-COF-Token": csrf, "Content-Type": "application/json" }, body: JSON.stringify({ label, email }) });
+    const j = await r.json();
+    if (!j.ok) { msg.innerHTML = `<span class="err">${esc(j.error || "Failed.")}</span>${j.log ? `<pre>${esc(j.log)}</pre>` : ""}`; $("add-go").disabled = false; return; }
+    msg.innerHTML = j.signin
+      ? `Added <b>${esc(label)}</b>. A private browser window is opening: sign in${email ? " as <b>" + esc(email) + "</b>" : ""} there. It appears here as signed in once you finish (the window waits up to 15 min).`
+      : `Added <b>${esc(label)}</b>, but automatic sign-in is off. Run <code>claude-overflow login ${esc(label)}</code> in a terminal.`;
+    $("add-go").textContent = "Done"; $("add-go").disabled = false;
+    $("add-go").onclick = (ev) => { ev.preventDefault(); dlg.close(); $("add-go").textContent = "Add and sign in"; $("add-go").onclick = null; };
+    load(false);
+    // watch for the sign-in to land
+    let tries = 0; const iv = setInterval(async () => { tries++; await load(false); const a = S.accounts.find(x => x.label === label); if ((a && a.state !== "dead") || tries > 60) clearInterval(iv); }, 15000);
+  } catch (err) { msg.innerHTML = `<span class="err">${esc(err.message)}</span>`; $("add-go").disabled = false; }
+};
+
+$("btn-refresh").onclick = () => load(true);
+$("btn-quit").onclick = async () => { await post("/api/quit"); $("status").textContent = "server stopped; rerun claude_router to start it again"; clearInterval(timer); };
+// Only fetch usage while the tab is visible (the usage endpoint rate-limits, and the router needs it too).
+// A hidden tab just pings the server so it doesn't idle-exit; coming back refreshes immediately.
+let timer = setInterval(() => document.hidden ? fetch("/api/ping").catch(() => {}) : load(false), 60000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden && S && Date.now() / 1000 - S.now > 50) load(false); });
+let rt; window.addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(() => S && render(), 150); });
+load(false);
+</script>
+</body>
+</html>

@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "claude-router": {
+      "command": "/bin/sh",
+      "args": ["-c", "exec python3 \"${CLAUDE_OVERFLOW_HOME:-$HOME/.claude-overflow}/cof-mcp.py\""]
+    }
+  }
+}

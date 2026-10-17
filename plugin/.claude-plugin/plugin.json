@@ -1,0 +1,8 @@
+{
+  "name": "claude-router",
+  "version": "1.0.1",
+  "description": "Makes every Claude Code session aware of the claude-max-overflow router: account + usage context at session start, notes when the account gets full or before large fan-outs, a router_status MCP tool, and a skill for splitting work across accounts. Needs the router installed (~/.claude-overflow).",
+  "author": { "name": "Aaron Bergman" },
+  "homepage": "https://github.com/AaronBergman/claude-max-overflow",
+  "license": "MIT"
+}

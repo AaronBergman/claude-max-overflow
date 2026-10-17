@@ -1,0 +1,13 @@
+{
+  "name": "claude-max-overflow",
+  "owner": { "name": "Aaron Bergman" },
+  "metadata": { "description": "Plugins for the claude-max-overflow multi-account router." },
+  "plugins": [
+    {
+      "name": "claude-router",
+      "source": "./plugin",
+      "description": "Makes every Claude Code session aware of the claude-max-overflow router: account + usage context at session start, notes when the account gets full or before large fan-outs, a router_status MCP tool, and a skill for splitting work across accounts.",
+      "version": "1.0.1"
+    }
+  ]
+}

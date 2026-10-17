@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# claude-max-overflow-shim
+#
+# Router-aware `claude` for programs: scripts, timeout/xargs, `subprocess.run(["claude", ...])`, and Claude
+# Code's own Bash tool (its shell snapshot keeps the `claude` function but not the router's helpers, so the
+# function falls through to whatever `claude` is on PATH). Interactive shells use the router's `claude`
+# function directly and never reach this file.
+#
+# Optional; setup.sh installs it as ~/.claude-overflow/shim/claude and the loader puts that dir first on PATH.
+# It loads the router and hands off to its `claude` function, so a run picks an account by live usage and is
+# billed to a Max subscription even when ANTHROPIC_API_KEY is set in the environment.
+#   CLAUDE_OVERFLOW_SHIM=0 claude ...   skips the router for one call: the real binary runs, environment untouched
+# If the router can't load, the real binary runs with the API key stripped.
+#
+# The marker on line 2 tells the router's _cof_bin (and real_claude below) to skip this file when they look
+# for the real binary, so nothing that runs Claude Code for one specific account can land back in here.
+
+unset COF_MANAGED COF_CTRL_DIR COF_ACCOUNT COF_PIDFILE   # a nested run must not inherit a managed session's state
+
+real_claude() {  # the first `claude` on PATH that isn't a copy of this shim
+  local d IFS=:
+  for d in $PATH; do
+    [ -n "$d" ] && [ -f "$d/claude" ] && [ -x "$d/claude" ] || continue
+    head -c 4096 "$d/claude" 2>/dev/null | grep -q 'claude-max-overflow-shim' && continue
+    printf '%s/claude' "$d"; return 0
+  done
+  return 1
+}
+
+# Entered again from inside the router means something resolved `claude` through PATH instead of _cof_bin (an
+# older loader, say). Loading the router again would recurse without end, so run the real binary with the
+# environment exactly as given instead (an account's CLAUDE_CONFIG_DIR stays intact). The router clears the
+# marker on everything it launches, so sessions it starts get the shim again for their own nested runs.
+if [ -n "${COF_SHIM_ACTIVE:-}" ]; then
+  real=$(real_claude) || exit 127
+  exec env -u COF_SHIM_ACTIVE -u ANTHROPIC_API_KEY -u CLAUDE_CODE_OAUTH_TOKEN "$real" "$@"
+fi
+
+if [ "${CLAUDE_OVERFLOW_SHIM:-1}" != "0" ]; then
+  export COF_SHIM_ACTIVE=1
+  router="${CLAUDE_OVERFLOW_HOME:-$HOME/.claude-overflow}/claude-overflow.sh"
+  if [ -r "$router" ]; then
+    . "$router" >/dev/null 2>&1
+    if type _cof_run_in >/dev/null 2>&1 && type claude >/dev/null 2>&1; then
+      claude "$@"
+      exit $?
+    fi
+  fi
+fi
+real=$(real_claude) || { printf 'claude: no Claude Code binary on PATH (only the claude-max-overflow shim)\n' >&2; exit 127; }
+[ "${CLAUDE_OVERFLOW_SHIM:-1}" = "0" ] && exec "$real" "$@"
+exec env -u COF_SHIM_ACTIVE -u ANTHROPIC_API_KEY -u CLAUDE_CODE_OAUTH_TOKEN "$real" "$@"

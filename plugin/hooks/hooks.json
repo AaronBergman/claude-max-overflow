@@ -1,0 +1,14 @@
+{
+  "description": "claude-router context (cof-context.py in the router's install dir; silent no-op if the router isn't installed)",
+  "hooks": {
+    "SessionStart": [
+      { "hooks": [ { "type": "command", "command": "f=\"${CLAUDE_OVERFLOW_HOME:-$HOME/.claude-overflow}/cof-context.py\"; [ -f \"$f\" ] && exec python3 \"$f\"; exit 0", "timeout": 15 } ] }
+    ],
+    "UserPromptSubmit": [
+      { "hooks": [ { "type": "command", "command": "f=\"${CLAUDE_OVERFLOW_HOME:-$HOME/.claude-overflow}/cof-context.py\"; [ -f \"$f\" ] && exec python3 \"$f\"; exit 0", "timeout": 5 } ] }
+    ],
+    "PreToolUse": [
+      { "matcher": "Agent|Task|Workflow", "hooks": [ { "type": "command", "command": "f=\"${CLAUDE_OVERFLOW_HOME:-$HOME/.claude-overflow}/cof-context.py\"; [ -f \"$f\" ] && exec python3 \"$f\"; exit 0", "timeout": 5 } ] }
+    ]
+  }
+}

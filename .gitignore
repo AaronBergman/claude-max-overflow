@@ -1,0 +1,6 @@
+claude_code/
+codex/
+.remember/
+CLAUDE.local.md
+__pycache__/
+.DS_Store

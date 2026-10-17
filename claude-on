@@ -1,0 +1,17 @@
+#!/bin/bash
+# claude-on <label|primary> [claude args...]
+#
+# Run Claude Code on one specific router account from ANY shell, including Claude Code's own Bash tool
+# (whose shell snapshot has `cacct` but not the router's _cof_* helpers, so `cacct work ...` there would
+# silently run on primary). Typical use, from inside a session whose account is running low:
+#
+#   claude-on work -p "summarize every file in ./notes into notes/SUMMARY.md" --permission-mode acceptEdits
+#
+# The child is a normal headless Claude Code run billed to that account's limits; it does not inherit the
+# calling session's router-managed state (the COF_* env is cleared), and `-p` runs are never hopped.
+
+[ $# -ge 1 ] || { printf 'usage: claude-on <label|primary> [claude args...]\n' >&2; exit 2; }
+unset COF_MANAGED COF_CTRL_DIR COF_ACCOUNT COF_PIDFILE
+. "${CLAUDE_OVERFLOW_HOME:-$HOME/.claude-overflow}/claude-overflow.sh" >/dev/null 2>&1
+type _cof_run_in >/dev/null 2>&1 || { printf 'claude-on: the router loader did not load (%s)\n' "${CLAUDE_OVERFLOW_HOME:-$HOME/.claude-overflow}/claude-overflow.sh" >&2; exit 1; }
+cacct "$@"
