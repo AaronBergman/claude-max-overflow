@@ -38,8 +38,8 @@ mkdir -p "$COF_HOME/profiles" "$COF_HOME/cache"
 cp "$REPO_DIR/claude-overflow.sh" "$COF_HOME/claude-overflow.sh"
 cp "$REPO_DIR/cof-insession-hook.sh" "$COF_HOME/cof-insession-hook.sh" 2>/dev/null && chmod +x "$COF_HOME/cof-insession-hook.sh"
 cp "$REPO_DIR/cof-dashboard.py" "$REPO_DIR/cof-dashboard.html" "$COF_HOME/" 2>/dev/null  # claude-overflow dashboard
-cp "$REPO_DIR/cof-context.py" "$REPO_DIR/cof-mcp.py" "$REPO_DIR/cof-statusline.py" "$REPO_DIR/claude-on" "$COF_HOME/" 2>/dev/null  # claude-router plugin runtime
-chmod +x "$COF_HOME/claude-on" "$COF_HOME/cof-dashboard.py" 2>/dev/null
+cp "$REPO_DIR/cof-context.py" "$REPO_DIR/cof-mcp.py" "$REPO_DIR/cof-statusline.py" "$REPO_DIR/claude-on" "$REPO_DIR/claude-dispatch" "$COF_HOME/" 2>/dev/null  # claude-router plugin runtime
+chmod +x "$COF_HOME/claude-on" "$COF_HOME/claude-dispatch" "$COF_HOME/cof-dashboard.py" 2>/dev/null
 # an already-installed claude-shim is refreshed in place (it's offered further down)
 [ -f "$COF_HOME/shim/claude" ] && cp "$REPO_DIR/claude-shim" "$COF_HOME/shim/claude" && chmod +x "$COF_HOME/shim/claude"
 cp "$REPO_DIR/cof-restart.sh" "$COF_HOME/" 2>/dev/null  # /restart
@@ -148,6 +148,7 @@ for d in "$HOME/.local/bin" "$HOME/bin"; do
 done
 if [ -n "$bindir" ]; then
   ln -sf "$COF_HOME/claude-on" "$bindir/claude-on" && echo "claude-on -> $bindir/claude-on"
+  ln -sf "$COF_HOME/claude-dispatch" "$bindir/claude-dispatch" && echo "claude-dispatch -> $bindir/claude-dispatch"
   if [ ! -e "$bindir/claude_router" ] || [ -L "$bindir/claude_router" ]; then
     ln -sf "$COF_HOME/cof-dashboard.py" "$bindir/claude_router" && echo "claude_router -> $bindir/claude_router"
   fi

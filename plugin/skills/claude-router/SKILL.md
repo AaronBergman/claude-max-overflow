@@ -18,6 +18,7 @@ This Mac spreads Claude Code over several Claude Max subscriptions: a **primary*
 - **Managed sessions** (launched through that wrapper) move themselves when the account runs out:
   - at 95% on any window, the hook ends the session at the next turn boundary (SIGTERM) and relaunches `--resume <id>` on another account;
   - on a rate-limit error, it does the same right away.
+  - optionally (`CLAUDE_OVERFLOW_INSESSION_LEAVE_PRIMARY=1`), a session on primary also moves once primary passes its launch thresholds, keeping a reserve for the claude.ai apps. This move is soft: it waits for a turn end with no `/goal` loop and no background Bash, agent or Workflow running, and never happens to a session started with `cacct primary` (pinned). Subagents and workflows started on primary before that move bill primary.
   - The conversation survives. Work in flight in the process (background agents, running Workflows, background Bash) does not.
 - **Unmanaged sessions** stay put and just stop at the limit. These are desktop-app sessions, Remote Control, `claude -p`, or anything launched outside the wrapper.
 - Subagents and workflow agents **always** run on the calling session's account. Nothing inside a session can change which account a subagent bills.
@@ -37,6 +38,8 @@ This Mac spreads Claude Code over several Claude Max subscriptions: a **primary*
    - It does not see this conversation: give it everything it needs, and have it write outputs to files.
    - Pass `--allowedTools` / `--permission-mode` as the task needs; headless runs cannot ask for permission.
    - Use `claude-on`, not `cacct`, from the Bash tool: Claude Code's shell snapshot lacks the router's helpers (`cacct` there only works by handing off to `claude-on`).
+   - For a whole subtask with a report back, use `claude-dispatch <label|primary|auto> [--chrome] [--resume <session>] "<brief>"` (brief on stdin works too). Run it from Bash with `run_in_background` and read its output when notified: progress lines, then the child's final report and a ready `--resume` line for follow-ups.
+   - Capabilities tied to one claude.ai account: Claude in Chrome pairs with the account the extension is signed into. If a browser tool says the extension isn't connected, `claude-dispatch auto --chrome "<brief>"` runs the task on the paired account (`claude-dispatch --find-chrome` names it).
 5. **For interactive continuation elsewhere:** ask the user to run `c-<label>` for a new session there, or `cswap` to continue the latest conversation on another account.
 6. **If every account is tight:** say so, give the next reset times from `router_status`, and scope the work down. Do not start a big job that will stall.
 

@@ -1,0 +1,264 @@
+#!/usr/bin/env python3
+"""claude-dispatch: hand a self-contained subtask to Claude Code on another router account and get its report back.
+
+  claude-dispatch <label|primary|auto> [options] [brief]    brief from stdin when omitted or "-"
+  claude-dispatch --find-chrome                             which accounts have a Claude in Chrome browser connected
+
+Options:
+  --chrome              enable Claude in Chrome in the child; with "auto", run on an account whose Chrome is connected
+  --resume <session>    follow up inside an earlier dispatch's conversation (any account; history is shared)
+  --permission-mode M   default: auto (the child runs unattended)
+  --model M, --effort E passed to claude
+  --cwd DIR             working directory for the child (default: the current one)
+  -- ...                everything after "--" goes to claude verbatim
+
+Why it exists: subagents always bill the calling session's account, and some capabilities belong to one claude.ai
+account only (Claude in Chrome pairs with the account the extension is signed into; claude.ai connectors are
+per-account). claude-on already runs a headless session on a chosen account; this wraps it into a brief-in,
+report-out loop that a session can run from its Bash tool (ideally in the background) and follow up with --resume.
+
+Each run gets a folder in $CLAUDE_OVERFLOW_HOME/dispatch/ (brief.md, stream.jsonl, result.md, meta.json; owner-only).
+Progress lines show tool names and short descriptions, never tool output.
+"""
+import json
+import os
+import re
+import signal
+import subprocess
+import sys
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+
+COF_HOME = Path(os.environ.get("CLAUDE_OVERFLOW_HOME", Path.home() / ".claude-overflow"))
+DISPATCH_DIR = COF_HOME / "dispatch"
+CHROME_CACHE = COF_HOME / "cache" / "chrome-accounts.json"
+CHROME_CACHE_TTL = 12 * 3600
+PROBE_TIMEOUT = 180
+
+PREAMBLE = """You are running as a dispatched subtask: another Claude Code session (on a different account of the same \
+person) handed you the brief below and is waiting for your report. Nobody is watching this run and you cannot ask \
+questions. Do the task end to end with your own judgment, verify what you did, and if you are blocked on something only \
+the person can do (passwords, 2FA codes, CAPTCHAs, a decision that is genuinely theirs), stop and say exactly what is \
+needed. Your final message is the report the dispatcher receives: lead with the outcome, then what you did and how you \
+verified it, then anything left undone. Never put secret values (keys, tokens, passwords) in your messages or tool \
+descriptions; refer to them by name. Close any browser tabs you opened."""
+
+CHROME_PROBE = """Load the tool mcp__claude-in-chrome__list_connected_browsers with ToolSearch (query \
+"select:mcp__claude-in-chrome__list_connected_browsers"), call it once, and reply with exactly one line: \
+CHROME <number of browsers it listed>. If the tool is missing or errors, reply CHROME 0. Do nothing else."""
+
+
+def die(msg, code=2):
+    print(f"claude-dispatch: {msg}", file=sys.stderr)
+    sys.exit(code)
+
+
+def claude_on():
+    here = Path(__file__).resolve().parent / "claude-on"
+    for p in (here, COF_HOME / "claude-on"):
+        if p.exists():
+            return str(p)
+    return "claude-on"
+
+
+def labels():
+    rows = []
+    tsv = COF_HOME / "accounts.tsv"
+    if tsv.exists():
+        rows = [ln.split("\t")[0] for ln in tsv.read_text().splitlines() if ln.strip() and not ln.startswith("#")]
+    return ["primary"] + rows
+
+
+def router_pick():
+    """The label the router would launch now (its own picker, so thresholds and signed-out accounts are honoured)."""
+    loader = COF_HOME / "claude-overflow.sh"
+    p = subprocess.run(["bash", "-c", f'. "{loader}" >/dev/null 2>&1; _cof_pick'], capture_output=True, text=True,
+                       timeout=60, env={k: v for k, v in os.environ.items() if not k.startswith("COF_")})
+    first = (p.stdout.strip().splitlines() or [""])[0].split("\t")
+    if not first[0] or first[0] == "login":
+        die("no account has headroom right now (router pick: %r)" % p.stdout.strip()[:120], 1)
+    return first[0]
+
+
+def probe_chrome(label):
+    cmd = [claude_on(), label, "-p", "--chrome", "--output-format", "json", "--model", "sonnet",
+           "--allowedTools", "ToolSearch,mcp__claude-in-chrome__list_connected_browsers"]
+    try:
+        p = subprocess.run(cmd, input=CHROME_PROBE, capture_output=True, text=True, timeout=PROBE_TIMEOUT)
+        res = json.loads(p.stdout or "{}").get("result", "")
+    except (subprocess.TimeoutExpired, json.JSONDecodeError) as e:
+        return label, None, type(e).__name__
+    m = re.search(r"CHROME\s+(\d+)", res or "")
+    return label, (int(m.group(1)) if m else None), ("" if m else (res or p.stderr or "no reply")[:120])
+
+
+def find_chrome(force=True):
+    if not force and CHROME_CACHE.exists():
+        c = json.loads(CHROME_CACHE.read_text())
+        if time.time() - c.get("at", 0) < CHROME_CACHE_TTL:
+            return c["accounts"]
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        found = list(ex.map(probe_chrome, labels()))
+    accounts = {lab: n for lab, n, _ in found}
+    for lab, n, err in found:
+        print(f"  {lab:<12} {'?' if n is None else n} browser(s){'  (' + err + ')' if err else ''}", file=sys.stderr)
+    CHROME_CACHE.parent.mkdir(parents=True, exist_ok=True)
+    CHROME_CACHE.write_text(json.dumps({"at": int(time.time()), "accounts": accounts}))
+    return accounts
+
+
+def summarize_tool(block):
+    inp = block.get("input") or {}
+    for k in ("description", "action_summary", "url", "query", "file_path", "pattern", "skill", "subject"):
+        if isinstance(inp.get(k), str) and inp[k].strip():
+            return f'{block.get("name")}: {" ".join(inp[k].split())[:110]}'
+    return block.get("name", "tool")
+
+
+def say(line):
+    print(f"[{time.strftime('%H:%M:%S')}] {line}", flush=True)
+
+
+def parse_args(argv):
+    o = {"label": None, "chrome": False, "resume": None, "pm": "auto", "model": None, "effort": None,
+         "cwd": os.getcwd(), "extra": [], "brief": None}
+    i = 0
+    while i < len(argv):
+        a = argv[i]
+        if a == "--":
+            o["extra"] = argv[i + 1:]
+            break
+        if a in ("-h", "--help"):
+            print(__doc__)
+            sys.exit(0)
+        if a == "--chrome":
+            o["chrome"] = True
+        elif a in ("--resume", "--permission-mode", "--model", "--effort", "--cwd"):
+            if i + 1 >= len(argv):
+                die(f"{a} needs a value")
+            o[{"--resume": "resume", "--permission-mode": "pm", "--model": "model", "--effort": "effort",
+               "--cwd": "cwd"}[a]] = argv[i + 1]
+            i += 1
+        elif a.startswith("--"):
+            die(f"unknown option {a} (put claude flags after --)")
+        elif o["label"] is None:
+            o["label"] = a
+        elif o["brief"] is None:
+            o["brief"] = a
+        else:
+            die("one brief only (quote it, or pass it on stdin)")
+        i += 1
+    return o
+
+
+def main(argv):
+    if argv[:1] == ["--find-chrome"]:
+        acc = find_chrome(force=True)
+        hit = [lab for lab, n in acc.items() if n]
+        print(" ".join(hit) if hit else "none")
+        return 0 if hit else 1
+    o = parse_args(argv)
+    if not o["label"]:
+        die("usage: claude-dispatch <label|primary|auto> [--chrome] [--resume SID] [brief]  (see --help)")
+    if o["label"] != "auto" and o["label"] not in labels():
+        die(f"unknown account {o['label']!r}; known: {', '.join(labels())}, auto")
+    brief = o["brief"] if o["brief"] not in (None, "-") else sys.stdin.read()
+    if not brief.strip():
+        die("empty brief")
+
+    label = o["label"]
+    if label == "auto" and o["chrome"]:
+        acc = find_chrome(force=False)
+        hit = [lab for lab, n in acc.items() if n]
+        if not hit:  # the cache may predate a reconnect: probe once more
+            acc = find_chrome(force=True)
+            hit = [lab for lab, n in acc.items() if n]
+        if not hit:
+            die("no account has a Claude in Chrome browser connected (sign the extension in, then retry)", 1)
+        label = hit[0]
+    elif label == "auto":
+        label = router_pick()
+
+    run = DISPATCH_DIR / f"{time.strftime('%Y%m%d-%H%M%S')}-{label}"
+    run.mkdir(parents=True, exist_ok=True)
+    os.chmod(run, 0o700)
+    (run / "brief.md").write_text(brief)
+
+    cmd = [claude_on(), label, "-p", "--output-format", "stream-json", "--verbose",
+           "--permission-mode", o["pm"], "--append-system-prompt", PREAMBLE]
+    if o["chrome"]:
+        cmd.append("--chrome")
+    if o["resume"]:
+        cmd += ["--resume", o["resume"]]
+    if o["model"]:
+        cmd += ["--model", o["model"]]
+    if o["effort"]:
+        cmd += ["--effort", o["effort"]]
+    cmd += o["extra"]
+
+    say(f"dispatching to {label}{' (chrome)' if o['chrome'] else ''}{' resuming ' + o['resume'] if o['resume'] else ''}; log {run}")
+    t0 = time.time()
+    env = {k: v for k, v in os.environ.items() if k not in ("CLAUDE_CODE_SESSION_ID",)}
+    proc = subprocess.Popen(cmd, cwd=o["cwd"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, env=env,
+                            start_new_session=True)
+
+    def forward(sig, _frame):
+        try:
+            os.killpg(proc.pid, sig)
+        except ProcessLookupError:
+            pass
+    signal.signal(signal.SIGINT, forward)
+    signal.signal(signal.SIGTERM, forward)
+
+    def feed():
+        proc.stdin.write(brief)
+        proc.stdin.close()
+    threading.Thread(target=feed, daemon=True).start()
+
+    meta = {"account": label, "chrome": o["chrome"], "resumed": o["resume"], "cwd": o["cwd"], "started": int(t0)}
+    result = None
+    fd = os.open(run / "stream.jsonl", os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as log:
+        for line in proc.stdout:
+            log.write(line)
+            log.flush()
+            try:
+                ev = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            t = ev.get("type")
+            if t == "system" and ev.get("subtype") == "init":
+                meta["session_id"] = ev.get("session_id")
+                meta["model"] = ev.get("model")
+                chrome = [s for s in ev.get("mcp_servers") or [] if "chrome" in (s.get("name") or "")]
+                say(f"session {meta['session_id']} on {label}, model {meta['model']}"
+                    + (f", chrome: {chrome[0].get('status')}" if chrome else ""))
+            elif t == "assistant":
+                for b in (ev.get("message") or {}).get("content") or []:
+                    if b.get("type") == "tool_use":
+                        say("  -> " + summarize_tool(b))
+                    elif b.get("type") == "text" and b.get("text", "").strip():
+                        say("  .. " + " ".join(b["text"].split())[:160])
+            elif t == "result":
+                result = ev
+    rc = proc.wait()
+
+    text = (result or {}).get("result") or ""
+    meta.update({"rc": rc, "seconds": round(time.time() - t0), "is_error": bool((result or {}).get("is_error")) or rc != 0,
+                 "num_turns": (result or {}).get("num_turns"), "cost_usd_equiv": (result or {}).get("total_cost_usd")})
+    meta["session_id"] = (result or {}).get("session_id") or meta.get("session_id")
+    (run / "result.md").write_text(text)
+    (run / "meta.json").write_text(json.dumps(meta, indent=1))
+    sid = meta.get("session_id")
+    mins, secs = divmod(meta["seconds"], 60)
+    print(f"\n=== dispatch report from {label} ({mins}m{secs:02d}s, {meta['num_turns']} turns"
+          f"{', ERROR' if meta['is_error'] else ''}) ===\n{text or '(no final message; see stream.jsonl)'}\n"
+          f"=== follow up: claude-dispatch {label}{' --chrome' if o['chrome'] else ''} --resume {sid} \"...\"\n"
+          f"=== files: {run}", flush=True)
+    return 1 if meta["is_error"] else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

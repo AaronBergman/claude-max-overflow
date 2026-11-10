@@ -40,6 +40,7 @@ if command -v "$CLAUDE_BIN" >/dev/null 2>&1 && env -u ANTHROPIC_API_KEY "$CLAUDE
 fi
 for d in "$HOME/.local/bin" "$HOME/bin"; do
   [ -L "$d/claude-on" ] && rm -f "$d/claude-on" && echo "Removed $d/claude-on."
+  [ -L "$d/claude-dispatch" ] && rm -f "$d/claude-dispatch" && echo "Removed $d/claude-dispatch."
   case "$(readlink "$d/claude_router" 2>/dev/null)" in */cof-dashboard.py) rm -f "$d/claude_router" && echo "Removed $d/claude_router." ;; esac
 done
 if [ -f "$COF_HOME/shim/claude" ]; then

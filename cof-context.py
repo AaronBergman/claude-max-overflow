@@ -71,7 +71,9 @@ def ago(ts):
 def router_cfg():
     f = CTX / "config.json"
     m = D.mtime(f)
-    if m and now() - m < 600 and D.mtime(D.LOADER) and D.mtime(D.LOADER) < m:
+    # stale once the loader or the user's config.sh changes, so threshold edits apply right away
+    if m and now() - m < 600 and D.mtime(D.LOADER) and D.mtime(D.LOADER) < m \
+            and (D.mtime(D.COF_HOME / "config.sh") or 0) < m:
         try:
             return json.loads(f.read_text())
         except ValueError:
@@ -91,7 +93,24 @@ def thresholds(cfg):
             "scoped_at": g("CLAUDE_OVERFLOW_SCOPED_AT", 92), "full_at": g("CLAUDE_OVERFLOW_FULL_AT", 97),
             "hop_at": g("CLAUDE_OVERFLOW_INSESSION_AT", 95),
             "insession": cfg.get("CLAUDE_OVERFLOW_INSESSION", "1") != "0",
-            "proactive": cfg.get("CLAUDE_OVERFLOW_INSESSION_PROACTIVE", "1") != "0"}
+            "proactive": cfg.get("CLAUDE_OVERFLOW_INSESSION_PROACTIVE", "1") != "0",
+            "leave_primary": cfg.get("CLAUDE_OVERFLOW_INSESSION_LEAVE_PRIMARY", "0") == "1"}
+
+
+def leaves_primary(snap):
+    """A managed session on primary that softly moves off it once primary reaches its launch thresholds."""
+    th = snap["th"]
+    return bool(snap["managed"] and th["insession"] and th["proactive"] and th["leave_primary"] and snap["label"] == "primary"
+                and not snap.get("pinned"))   # launched on primary by name (cacct primary): stays
+
+
+def primary_reserve_over(snap):
+    """For a leaves_primary session: the primary windows past their launch thresholds, e.g. ['weekly 85% >= 50%']."""
+    cur, th = snap["current"], snap["th"]
+    if not (leaves_primary(snap) and cur and cur["u"]):
+        return []
+    lim = {"session": th["session_at"], "weekly_all": th["weekly_at"], "weekly_scoped": th["scoped_at"]}
+    return [f"{w['name']} {w['pct']}% >= {lim[k]}%" for k, w in cur["win"].items() if k in lim and w["pct"] >= lim[k]]
 
 
 # ---------------- which account is this session on ----------------
@@ -309,7 +328,7 @@ def snapshot(fetch="all", env=None, model=None, timeout=8):
     api_key = next((k for k in ("ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_AUTH_TOKEN") if e.get(k)), None)
     return {"label": label, "managed": managed, "paused": paused, "model": model, "accounts": accts, "api_key": api_key,
             "current": next((a for a in accts if a["label"] == label), None), "pool": pool, "pick": pick,
-            "th": th, "t": now()}
+            "pinned": e.get("COF_PIN_PRIMARY") == "1", "th": th, "t": now()}
 
 
 # ---------------- text ----------------
@@ -340,8 +359,14 @@ def hop_sentence(snap):
     th = snap["th"]
     if snap["managed"] and th["insession"]:
         when_txt = f"at {th['hop_at']}% on any window or on a rate-limit error" if th["proactive"] else "on a rate-limit error"
-        return (f"router-managed: {when_txt} the router ends this session at the next turn boundary and resumes the same "
-                f"conversation on another account (background agents/workflows still running at that moment are lost).")
+        txt = (f"router-managed: {when_txt} the router ends this session at the next turn boundary and resumes the same "
+               f"conversation on another account (background agents/workflows still running at that moment are lost).")
+        if leaves_primary(snap):
+            txt += (f" Primary also keeps a reserve for the apps that can only use it: once primary reaches 5h {th['session_at']}%"
+                    f" / weekly {th['weekly_at']}% / model-scoped {th['scoped_at']}%, the router moves this conversation to an "
+                    "overflow account at the first turn end with no /goal loop and no background Bash, agent or workflow running "
+                    "(it never cuts those off for this; with no overflow room it stays).")
+        return txt
     return ("NOT router-managed (a headless `-p` run, the desktop app, Remote Control, or launched outside the `claude` "
             "wrapper): it stays on this account and simply stops at the limit.")
 
@@ -359,6 +384,11 @@ def warnings(snap):
                        + f"; the hop threshold is {th['hop_at']}%. Keep big fan-outs small or put them on another account.")
     elif cur:
         out.append(f"no usage reading for this session's account ({cur['err'] or 'no data yet'}).")
+    over = primary_reserve_over(snap)
+    if over:
+        out.append(f"primary is past its reserve threshold ({', '.join(over)}): this conversation moves to an overflow account at "
+                   "the next turn end with no /goal loop or background work running. Work done here until then, including "
+                   "subagents and workflows (which wait out the move), bills primary; prefer `claude-on <label>` for big chunks.")
     live = [a for a in snap["accounts"] if a["state"] != "dead" and a["u"]]
     if live and all(a["tight"][0] >= 90 for a in live):
         resets = sorted((w["resets"], a["label"], w["name"]) for a in live for w in a["win"].values() if w["resets"])
@@ -396,7 +426,8 @@ def session_start_text(snap):
         lines.append("Heads-up: " + w)
     lines.append("Before a large fan-out (Workflow, many agents), weigh it against this account's headroom; subagents always run on "
                  "this session's account. To put a self-contained chunk on another account: `claude-on <label> -p \"<prompt>\"` in Bash "
-                 "(headless, that account's quota). Live detail: MCP tool router_status (claude-router server); dashboard: `claude_router`.")
+                 "(headless, that account's quota), or `claude-dispatch <label|auto> [--chrome] \"<brief>\"` for a whole subtask with a "
+                 "report back (`--chrome` for Claude in Chrome, which works only on the account the extension is paired with). Live detail: MCP tool router_status (claude-router server); dashboard: `claude_router`.")
     lines.append("</claude-router>")
     return "\n".join(lines)
 
@@ -410,6 +441,9 @@ def fanout_note(snap, what):
     if snap["managed"] and th["insession"]:
         txt += (f"At {th['hop_at']}% the router moves this conversation to another account at the next turn end, which restarts "
                 "the session: background agents/workflows still running then are lost. ")
+        if primary_reserve_over(snap):
+            txt += ("Primary is also past its reserve for the apps, so the router wants this conversation off it; a background "
+                    "fan-out started here bills primary and delays that move until it finishes. ")
     else:
         txt += "This session isn't router-managed, so it just stops at the limit. "
     txt += "Other accounts: " + "; ".join(acct_line(a, resets=False) for a in others) + ". "

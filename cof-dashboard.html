@@ -671,7 +671,7 @@ function renderSignins() {
 function renderConfig() {
   const c = S.config;
   const rows = Object.keys(c).sort().map(k => `<tr><td><code>${esc(k)}</code></td><td>${esc(c[k])}</td></tr>`).join("");
-  $("config").innerHTML = `<div class="muted" style="font-size:12px;margin-bottom:6px">Effective values after <code>~/.claude-overflow/config.sh</code>. Launch picks: primary until 5h ≥ ${num("SESSION_AT", 85)}% or weekly ≥ ${num("WEEKLY_AT", 92)}% or scoped ≥ ${num("SCOPED_AT", 92)}%, then the first overflow account under ${num("FULL_AT", 97)}% (5h and weekly). Live sessions hop at ${num("INSESSION_AT", 95)}% of any window${c.CLAUDE_OVERFLOW_INSESSION_PROACTIVE === "1" ? "" : " (disabled: wall only)"} or on a rate-limit error.</div>
+  $("config").innerHTML = `<div class="muted" style="font-size:12px;margin-bottom:6px">Effective values after <code>~/.claude-overflow/config.sh</code>. Launch picks: primary until 5h ≥ ${num("SESSION_AT", 85)}% or weekly ≥ ${num("WEEKLY_AT", 92)}% or scoped ≥ ${num("SCOPED_AT", 92)}%, then the first overflow account under ${num("FULL_AT", 97)}% (5h and weekly). Live sessions hop at ${num("INSESSION_AT", 95)}% of any window${c.CLAUDE_OVERFLOW_INSESSION_PROACTIVE === "1" ? "" : " (disabled: wall only)"} or on a rate-limit error.${c.CLAUDE_OVERFLOW_INSESSION_LEAVE_PRIMARY === "1" ? " Live sessions on primary also move off it once it reaches those launch thresholds (soft: never while a /goal loop or background work is running), keeping primary's rest for the apps." : ""}</div>
     <details><summary>all variables (${Object.keys(c).length})</summary><table>${rows}</table></details>`;
 }
 

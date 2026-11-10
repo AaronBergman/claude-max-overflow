@@ -12,6 +12,14 @@
 #   * Stop (clean turn end) and the current account is at/over the in-session
 #     threshold (CLAUDE_OVERFLOW_INSESSION_AT, default 95%) -> the turn just
 #     finished on the last of the buffer; switch before the next turn.
+#   * Stop on primary with CLAUDE_OVERFLOW_INSESSION_LEAVE_PRIMARY=1 and primary at/over
+#     its launch thresholds (SESSION_AT / WEEKLY_AT / SCOPED_AT) -> a soft hop: the
+#     conversation moves to an overflow account so primary's remaining headroom stays
+#     free for what can only use primary (the desktop and mobile apps). Soft means it
+#     waits for a turn end where nothing is lost (no /goal loop driving the session, no
+#     background Bash, workflow or agent in flight) and quietly stays put when no
+#     overflow account has room (no pause, no sign-in windows). Sessions launched on
+#     primary by name (cacct primary; COF_PIN_PRIMARY=1) are pinned and never soft-hop.
 # It resolves another account that has headroom (reusing the router's own
 # _cof_pick), writes the target + session id into $COF_CTRL_DIR/switch, and ends
 # the session with SIGTERM after a short flush delay. The managed loop in
@@ -41,6 +49,9 @@ in=$(cat 2>/dev/null)
 sid=$(printf '%s' "$in" | jq -r '.session_id // empty' 2>/dev/null)
 err=$(printf '%s' "$in" | jq -r '.error // empty' 2>/dev/null)
 [ -n "$ev" ] || ev=$(printf '%s' "$in" | jq -r '.hook_event_name // "Stop"' 2>/dev/null)
+tp=$(printf '%s' "$in" | jq -r '.transcript_path // empty' 2>/dev/null)
+sha=$(printf '%s' "$in" | jq -r '.stop_hook_active // false' 2>/dev/null)
+cpid=$(cat "$COF_PIDFILE" 2>/dev/null)
 
 # --- load the router helpers (defines _cof_pick, _cof_fetch, thresholds, etc.) ---
 . "${COF_LOADER:-$HOME/.claude-overflow/claude-overflow.sh}" 2>/dev/null || exit 0
@@ -52,6 +63,46 @@ cur="${COF_ACCOUNT:-primary}"
 # terminal via the hook's systemMessage, so a pause/hop is never invisible.
 _ilog() { printf '%s %s %s %s: %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$cur" "$ev" "${err:--}" "$*" >> "${CLAUDE_OVERFLOW_HOME:-$HOME/.claude-overflow}/insession.log" 2>/dev/null; }
 _say() { _ilog "$*"; jq -cn --arg m "claude-overflow: $*" '{systemMessage: $m}' 2>/dev/null; }
+
+# --- is anything in flight that a soft hop (which restarts the session) would throw away? ---
+_goal_active() {  # the transcript's last goal_status record is unmet: a /goal loop keeps this session going
+  [ -n "$tp" ] && [ -f "$tp" ] || return 1
+  [ "$(grep -F '"type":"goal_status"' "$tp" 2>/dev/null \
+       | jq -r 'select(.type == "attachment" and .attachment.type == "goal_status") | .attachment.met' 2>/dev/null \
+       | tail -n 1)" = "false" ]
+}
+_bg_shells() {  # background Bash/Monitor commands still running (Bash-tool shells source a shell-snapshots file)
+  local p
+  [ -n "$cpid" ] || return 1
+  for p in $(pgrep -P "$cpid" 2>/dev/null); do
+    ps -o args= -p "$p" 2>/dev/null | grep -q 'shell-snapshots/snapshot-' && return 0
+  done
+  return 1
+}
+_tasks_dir() {  # Claude Code's per-session background-task outputs: <tmp>/claude-<uid>/<project>/<session>/tasks
+  local b d
+  if [ -n "${COF_TASKS_DIR:-}" ]; then printf '%s\n' "$COF_TASKS_DIR"; return; fi
+  [ -n "$sid" ] || return 0
+  for b in /private/tmp /tmp; do
+    for d in "$b/claude-$(id -u)"/*/"$sid"/tasks; do [ -d "$d" ] && { printf '%s\n' "$d"; return; }; done
+  done
+}
+_bg_tasks() {  # a workflow or background agent of this session still working
+  local d f id st sdir="${tp%.jsonl}"
+  d=$(_tasks_dir); [ -n "$d" ] && [ -d "$d" ] || return 1
+  # Background agents: tasks/a<id>.output links to the agent's transcript; a write in the last 10 min = working.
+  [ -n "$(find -L "$d" -maxdepth 1 -name 'a*.output' -mmin -10 2>/dev/null | head -n 1)" ] && return 0
+  # Workflows: tasks/w<id>.output; the run's workflows/<run>.json, written when it ends, records that task id.
+  for f in "$d"/w*.output; do
+    [ -e "$f" ] || continue
+    id=$(basename "$f" .output)
+    st=$(cat "$sdir"/workflows/*.json 2>/dev/null | jq -r --arg id "$id" 'select(.taskId? == $id) | .status' 2>/dev/null | tail -n 1)
+    [ -n "$st" ] && [ "$st" != "running" ] && continue
+    # No end record: still running, unless it died with an earlier process (nothing written for an hour).
+    [ -n "$(find "$f" "$sdir/subagents" -type f -mmin -60 2>/dev/null | head -n 1)" ] && return 0
+  done
+  return 1
+}
 
 # --- decide whether to switch ---
 want=0
@@ -88,6 +139,24 @@ EOF2
   at="${CLAUDE_OVERFLOW_INSESSION_AT:-95}"
   if [ "$s" -ge "$at" ] || [ "$w" -ge "$at" ] || [ "$sc" -ge "$at" ]; then want=1; fi
   [ "$sc" -ge "$at" ] && need_sc=scoped
+  # Soft hop off primary once it is past its launch thresholds (see the header).
+  if [ "$want" = "0" ] && [ "$cur" = "primary" ] && [ "${CLAUDE_OVERFLOW_INSESSION_LEAVE_PRIMARY:-0}" = "1" ] \
+     && [ "${COF_PIN_PRIMARY:-}" != "1" ]; then   # pinned: launched on primary by name
+    sa="${CLAUDE_OVERFLOW_SESSION_AT:-85}"; wa="${CLAUDE_OVERFLOW_WEEKLY_AT:-92}"; sca="${CLAUDE_OVERFLOW_SCOPED_AT:-92}"
+    over=""
+    [ "$s" -ge "$sa" ] && over="${over:+$over, }5h $s% >= $sa%"
+    [ "$w" -ge "$wa" ] && over="${over:+$over, }weekly $w% >= $wa%"
+    [ "$sc" -ge "$sca" ] && over="${over:+$over, }scoped $sc% >= $sca%"
+    if [ -n "$over" ]; then
+      [ "$sha" = "true" ] && exit 0   # another Stop hook is continuing this turn
+      _goal_active && exit 0
+      _bg_shells && exit 0
+      _bg_tasks && exit 0
+      soft=1; want=1
+      # only the model-scoped window is over: the overflow account needs room there too (as in _cof_pick)
+      [ "$s" -lt "$sa" ] && [ "$w" -lt "$wa" ] && need_sc=scoped
+    fi
+  fi
 fi
 [ "$want" = "1" ] || exit 0
 
@@ -107,6 +176,9 @@ fi
 # "wall": this turn died on a hard limit (the session is unusable until it moves);
 # "proactive": the turn finished fine, the account is just nearly out.
 trig=proactive; [ "$ev" = "StopFailure" ] && trig=wall
+
+# A soft hop is optional: with nowhere good to go, stay on primary quietly (no pause, no sign-in windows).
+[ "${soft:-0}" = "1" ] && [ "$bad" = "1" ] && exit 0
 
 if [ "$bad" = "1" ]; then
   if [ "$pick" = "login" ]; then
@@ -139,14 +211,18 @@ if [ "$bad" = "1" ]; then
   exit 0
 fi
 
-# The pool is draining: any other signed-out account gets its sign-in opened too (cooldown-limited),
-# so it is ready by the time this next account runs out.
-_cof_login_dead_bg insession "$cur" "$pick" >/dev/null 2>&1
+if [ "${soft:-0}" = "1" ]; then
+  # The managed loop shows this line when it relaunches; "leaving primary" also tells it not to notify.
+  reason="leaving primary ($over); $reason"
+else
+  # The pool is draining: any other signed-out account gets its sign-in opened too (cooldown-limited),
+  # so it is ready by the time this next account runs out.
+  _cof_login_dead_bg insession "$cur" "$pick" >/dev/null 2>&1
+fi
 
 # --- request the switch and end the session so the managed loop resumes elsewhere ---
 _ilog "switch -> $pick ($reason)"
 printf '%s\n%s\n%s\n' "$pick" "$sid" "$reason" > "$COF_CTRL_DIR/switch" 2>/dev/null
-cpid=$(cat "$COF_PIDFILE" 2>/dev/null)
 if [ -n "$cpid" ]; then
   d="${CLAUDE_OVERFLOW_INSESSION_KILL_DELAY:-1}"
   # detached so it outlives this hook; SIGTERM lets Claude Code exit cleanly and

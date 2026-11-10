@@ -121,7 +121,9 @@ def status_report(fresh=False):
     lines.append("")
     lines.append(f"Router thresholds: a launch skips primary at 5h >= {th['session_at']}%, weekly >= {th['weekly_at']}%, "
                  f"model-scoped >= {th['scoped_at']}%; an overflow account counts as full at {th['full_at']}%; a managed "
-                 f"session hops at {th['hop_at']}%" + ("" if th["insession"] else " (in-session hopping is OFF)") + ".")
+                 f"session hops at {th['hop_at']}%" + ("" if th["insession"] else " (in-session hopping is OFF)")
+                 + ("; a managed session on primary also moves off it (softly, at a turn end with no /goal or background work "
+                    "running) once primary reaches those launch thresholds" if th["insession"] and th["leave_primary"] else "") + ".")
     b = C.best_other(snap)
     lines.append("Splitting work: subagents and workflows always run on this session's account. For a self-contained chunk "
                  f"on another account run `claude-on <label> -p \"<prompt>\"` in Bash"

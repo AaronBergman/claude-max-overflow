@@ -51,6 +51,7 @@ CLAUDE_OVERFLOW_MIRROR_TIMEOUT="${CLAUDE_OVERFLOW_MIRROR_TIMEOUT:-90}"    # seco
 CLAUDE_OVERFLOW_INSESSION="${CLAUDE_OVERFLOW_INSESSION:-1}"               # 1: move a live conversation to another account when the current one runs out
 CLAUDE_OVERFLOW_INSESSION_PROACTIVE="${CLAUDE_OVERFLOW_INSESSION_PROACTIVE:-1}"  # 1: also hop at a clean turn boundary once the account is near its limit (uses the buffer to finish the turn, then transfers); 0: only when the wall is actually hit
 CLAUDE_OVERFLOW_INSESSION_AT="${CLAUDE_OVERFLOW_INSESSION_AT:-95}"        # proactive hop threshold (% of any window) for a live session; higher than the launch thresholds so most of the buffer is used first
+CLAUDE_OVERFLOW_INSESSION_LEAVE_PRIMARY="${CLAUDE_OVERFLOW_INSESSION_LEAVE_PRIMARY:-0}"  # 1: a live session on primary also moves to an overflow account once primary reaches its launch thresholds (soft: waits until no /goal or background work would be lost; stays put if no overflow account has room). Use with lower SESSION_AT/WEEKLY_AT to keep a reserve on primary for apps that can only use it
 CLAUDE_OVERFLOW_INSESSION_KILL_DELAY="${CLAUDE_OVERFLOW_INSESSION_KILL_DELAY:-1}"  # seconds to let the transcript flush before ending the session to resume elsewhere
 [ -f "$CLAUDE_OVERFLOW_HOME/config.sh" ] && . "$CLAUDE_OVERFLOW_HOME/config.sh"
 [ -f "$CLAUDE_OVERFLOW_HOME/aliases.sh" ] && . "$CLAUDE_OVERFLOW_HOME/aliases.sh"
@@ -70,6 +71,14 @@ _COF_LAUNCHD_LABEL="com.claude-max-overflow.keepalive"
 # ---------- small utilities ----------
 _cof_os() { uname; }
 _cof_mtime() { stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null || echo 0; }
+_COF_CFG_SEEN=$(_cof_mtime "$CLAUDE_OVERFLOW_HOME/config.sh")
+_cof_cfg_refresh() {  # a long-lived shell picks up config.sh edits (thresholds etc.) at its next launch; a line deleted from config.sh keeps its old value here until a new shell
+  local m; m=$(_cof_mtime "$CLAUDE_OVERFLOW_HOME/config.sh")
+  [ "$m" = "${_COF_CFG_SEEN:-}" ] && return 0
+  _COF_CFG_SEEN="$m"
+  [ -f "$CLAUDE_OVERFLOW_HOME/config.sh" ] && . "$CLAUDE_OVERFLOW_HOME/config.sh"
+  return 0
+}
 _cof_now_ms() { printf '%s000' "$(date +%s)"; }
 _cof_interactive() { [ -t 0 ] && [ -t 1 ]; }
 _cof_dim() { if [ -t 2 ]; then printf '\033[2m%s\033[0m\n' "$*" >&2; else printf '%s\n' "$*" >&2; fi; }
@@ -880,6 +889,8 @@ _cof_run_managed() {  # $1 label, $2 dir, rest = original claude args. Loops acr
     _cof_mark "$target"
     if [ "$reason" = "restart" ]; then   # /restart (cof-restart.sh): same account, not a hop
       _cof_dim "↻ restarting Claude Code and resuming this conversation…"
+    elif [ "${reason#leaving primary}" != "$reason" ]; then   # soft hop (INSESSION_LEAVE_PRIMARY): expected, no notification
+      _cof_dim "→ moving this conversation off primary to \"$target\" (${reason#leaving primary }) and resuming…"
     else
       _cof_dim "→ \"$label\" ran out; moving this conversation to \"$target\" ($reason) and resuming…"
       _cof_notify "Claude overflow: switched to $target" "$reason"
@@ -905,12 +916,18 @@ cacct() {  # launch a specific account: cacct <label|primary> [claude args...]
     printf 'cacct: router helpers not loaded in this shell; run: bash -c %s\n' "'. ~/.claude-overflow/claude-overflow.sh; cacct $1 ...'" >&2; return 1
   fi
   local label="$1" dir cred st t0 rc
+  _cof_cfg_refresh
   shift 2>/dev/null || { printf 'usage: cacct <label|primary> [args...]\n' >&2; return 2; }
   if [ "$label" = "primary" ]; then
     _cof_mark primary
     # a session is starting: any signed-out overflow account gets its sign-in window now (background, cooldown-limited)
     _cof_session_launch "$@" && [ -s "$_COF_ACCOUNTS" ] && _cof_login_dead_bg launch primary
-    if _cof_insession_wanted "$@"; then _cof_run_managed "primary" "$CLAUDE_OVERFLOW_PRIMARY_DIR" "$@"; return $?; fi
+    if _cof_insession_wanted "$@"; then
+      # Asked for primary by name (cacct primary, CLAUDE_ACCOUNT=primary): pinned, so the soft
+      # INSESSION_LEAVE_PRIMARY hop leaves it alone (e.g. it needs claude.ai connectors only primary has).
+      if [ "${_COF_AUTOPICK:-}" = "1" ]; then _cof_run_managed "primary" "$CLAUDE_OVERFLOW_PRIMARY_DIR" "$@"; return $?; fi
+      COF_PIN_PRIMARY=1 _cof_run_managed "primary" "$CLAUDE_OVERFLOW_PRIMARY_DIR" "$@"; return $?
+    fi
     _cof_run_in "" "$@"; return $?
   fi
   dir=$(_cof_dir_for "$label") || { printf 'cacct: unknown account "%s" (see %s)\n' "$label" "$_COF_ACCOUNTS" >&2; return 1; }
@@ -934,6 +951,7 @@ cacct() {  # launch a specific account: cacct <label|primary> [claude args...]
 claude() {  # auto-picking wrapper; inert (plain primary) until accounts.tsv exists
   type _cof_run_in >/dev/null 2>&1 || { env -u ANTHROPIC_API_KEY -u CLAUDE_CODE_OAUTH_TOKEN -u CLAUDE_CONFIG_DIR command claude "$@"; return $?; }
   local a pick
+  _cof_cfg_refresh
   if [ -n "${CLAUDE_ACCOUNT:-}" ]; then cacct "$CLAUDE_ACCOUNT" "$@"; return $?; fi
   for a in "$@"; do
     case "$a" in -*) continue ;; esac
@@ -947,12 +965,13 @@ claude() {  # auto-picking wrapper; inert (plain primary) until accounts.tsv exi
   done
   if [ ! -s "$_COF_ACCOUNTS" ]; then cacct primary "$@"; return $?; fi
   pick=$(_cof_resolve "")
-  cacct "$pick" "$@"
+  _COF_AUTOPICK=1 cacct "$pick" "$@"
 }
 
 cswap() {  # continue the latest conversation on a DIFFERENT account
   type _cof_run_in >/dev/null 2>&1 || { printf 'cswap: router helpers not loaded in this shell\n' >&2; return 1; }
   local last pick
+  _cof_cfg_refresh
   last=$(cat "$_COF_CACHE/last" 2>/dev/null || echo primary)
   pick=$(_cof_resolve "$last")
   if [ "$pick" = "$last" ]; then
@@ -960,7 +979,7 @@ cswap() {  # continue the latest conversation on a DIFFERENT account
     pick=primary
   fi
   _cof_dim "→ continuing on \"$pick\""
-  cacct "$pick" --continue "$@"
+  _COF_AUTOPICK=1 cacct "$pick" --continue "$@"
 }
 
 climits() {  # all accounts' limit windows + extra-usage spend + credential state
@@ -1187,7 +1206,8 @@ claude-overflow() {
       esac
       if [ "$CLAUDE_OVERFLOW_INSESSION" = "1" ]; then
         if [ -f "$(_cof_insession_hook_path)" ]; then
-          printf 'in-session switch: on (hop at %s%%%s; hook %s)\n' "$CLAUDE_OVERFLOW_INSESSION_AT" "$([ "$CLAUDE_OVERFLOW_INSESSION_PROACTIVE" = 1 ] || printf ', wall only')" "$(_cof_insession_hook_path)"
+          printf 'in-session switch: on (hop at %s%%%s%s; hook %s)\n' "$CLAUDE_OVERFLOW_INSESSION_AT" "$([ "$CLAUDE_OVERFLOW_INSESSION_PROACTIVE" = 1 ] || printf ', wall only')" \
+            "$([ "$CLAUDE_OVERFLOW_INSESSION_LEAVE_PRIMARY" = 1 ] && printf '; sessions leave primary at 5h %s%% / weekly %s%% / scoped %s%%' "$CLAUDE_OVERFLOW_SESSION_AT" "$CLAUDE_OVERFLOW_WEEKLY_AT" "$CLAUDE_OVERFLOW_SCOPED_AT")" "$(_cof_insession_hook_path)"
         else
           printf '!! in-session switch: enabled but hook missing at %s (re-run setup.sh)\n' "$(_cof_insession_hook_path)"
         fi
@@ -1215,6 +1235,8 @@ in-session: a managed conversation moves itself to another account when the curr
   next clean turn boundary (>= CLAUDE_OVERFLOW_INSESSION_AT, default 95%); if nothing
   has headroom it pauses instead. Toggle: CLAUDE_OVERFLOW_INSESSION=0 (off),
   CLAUDE_OVERFLOW_INSESSION_PROACTIVE=0 (only switch when the wall is actually hit).
+  CLAUDE_OVERFLOW_INSESSION_LEAVE_PRIMARY=1: sessions on primary also move to an overflow
+  account once primary reaches its launch thresholds (keeps a reserve for the apps).
 sign-in: a signed-out account gets its browser sign-in opened for you whenever that could
   unlock usage: synchronously when a launch needs it now; in the background when a session
   starts, when a paused conversation is waiting on it (it moves there once you finish), or
