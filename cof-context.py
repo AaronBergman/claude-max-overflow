@@ -124,7 +124,7 @@ def session_account(env=None):
     d = env.get("CLAUDE_CONFIG_DIR")
     if d:
         rd = os.path.realpath(os.path.expanduser(d))
-        if rd != os.path.realpath(D.HOME / ".claude"):
+        if rd != os.path.realpath(D.primary_dir()):
             label = next((r["label"] for r in rows[1:] if os.path.realpath(os.path.expanduser(r["dir"])) == rd), None) or "unregistered"
     managed = (env.get("COF_MANAGED") == "1" and env.get("COF_ACCOUNT") == label and bool(env.get("COF_CTRL_DIR"))
                and _is_managed_claude(env.get("COF_PIDFILE")))

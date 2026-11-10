@@ -1,8 +1,39 @@
 # claude-max-overflow
 
-Use the model usage from **multiple Claude Max subscriptions** in Claude Code without ever thinking about which account you're on. One **primary** account owns all your configuration; any number of **overflow** accounts provide extra capacity. `claude` becomes a shell function that checks your primary account's live rate limits at launch and transparently starts the session under whichever account has headroom. Overflow credentials are kept alive automatically, and when one genuinely needs a fresh sign-in the tool opens the right login page for you instead of silently falling back. Sessions that ran on an overflow account are [mirrored](#seeing-overflow-sessions-in-claudeai) into your primary account's claude.ai afterwards, so your session history stays in one place there too.
+**A router for Claude Code across several Claude Max subscriptions** (also known as the Claude router; its plugin and dashboard are called `claude-router`). You keep typing `claude`. One **primary** account owns all your configuration; any number of **overflow** accounts add capacity. Each launch goes to an account with headroom, a conversation that runs its account dry moves itself to another one and carries on, and Claude itself is told how much is left on every account.
+
+![The dashboard on made-up data: pooled and per-account usage, where the next launch goes, headroom, burn rate and a week of history](docs/dashboard.png)
+
+*The dashboard (`claude_router`), shown on invented accounts. Try it without installing anything: `python3 tools/dashboard-demo.py`.*
 
 > ⚠️ **Experimental.** This is a young project, lightly tested (macOS + zsh primarily; Linux/bash support is best-effort and less exercised). It reads Claude Code's OAuth credentials from your OS credential store and calls the same undocumented usage endpoint that powers `/usage`; any Claude Code update could break it. Nothing here touches your primary login, and there's a clean [uninstall](#uninstall), but treat it accordingly.
+
+## What you get
+
+- **One command, many accounts.** `claude` checks live rate limits at launch (5-hour, weekly and model-scoped windows) and starts the session on an account with room. Settings, skills, hooks, plugins, memory and session history are shared, so every account behaves like your primary. [How it works](#how-it-works)
+- **Conversations that don't hit the wall.** When the current account runs out mid-session, the same conversation resumes on another account at the next turn boundary. [Switching accounts mid-conversation](#switching-accounts-mid-conversation)
+- **Logins that stay alive.** Idle overflow accounts are refreshed on a schedule, and one that really needs a new sign-in gets its login page opened for you (right email, private window, verified). [Credential lifecycle](#credential-lifecycle)
+- **A Claude that knows its budget.** A plugin tells every session which account it is on and what is left everywhere, warns before a big fan-out, and gives Claude `claude-on` and `claude-dispatch` to put work on another account. [claude-router plugin](#claude-knows-about-the-router-claude-router-plugin)
+- **A dashboard.** Usage per account and pooled, where the next launch goes and why, burn rate, hop history and router health. [Dashboard](#dashboard)
+- **One history in claude.ai too.** Sessions that ran on an overflow account are mirrored into your primary's claude.ai. [Seeing overflow sessions in claude.ai](#seeing-overflow-sessions-in-claudeai)
+
+## Quick start
+
+```bash
+git clone https://github.com/AaronBergman/claude-max-overflow.git
+cd claude-max-overflow
+bash setup.sh        # guided: adds your overflow accounts, wires your shell rc, offers the optional parts
+```
+
+Open a new terminal, then:
+
+```bash
+claude           # as always; the router picks the account
+climits          # every account's usage, reset times and login state
+claude_router    # the dashboard
+```
+
+Details: [Requirements](#requirements), [Install](#install), [Commands and tuning](#commands), [FAQ](#faq), [Uninstall](#uninstall).
 
 ## Why
 
@@ -246,6 +277,9 @@ Removes the keep-alive job, offers to log out the overflow profiles, removes the
 
 - The loader is one POSIX-ish file that must pass both `bash -n claude-overflow.sh` and `zsh -n claude-overflow.sh`; the Python parts are stdlib only.
 - `bash tests/test-bin-resolution.sh` runs offline in a few seconds (bash and zsh): a fake Claude Code binary records which config dir every launch, refresh ping, sign-in and `auth` call reaches, with a router-re-entering wrapper or the claude-shim first on PATH; Keychain, network and notifications are stubbed.
+- `bash tests/test-leave-primary.sh` covers the soft hop off primary (offline, a stub loader and `sleep` standing in for Claude Code).
+- `python3 tools/dashboard-demo.py` runs the real dashboard server against a throwaway sandbox of invented accounts (credentials, usage, process list and hostname are all canned; the Keychain and the network are never touched, and the page's actions are read-only). Use it to work on the page or to take screenshots that show nothing private. `COF_DEMO_CHECK=1 python3 tools/dashboard-demo.py` assembles the page's state once and checks it, as a smoke test.
+- CI (`.github/workflows/test.yml`) runs the syntax checks, both offline suites and the dashboard smoke test on macOS and Linux for every push and pull request.
 - To work on a live install, symlink the files in `~/.claude-overflow` to your clone instead of copying them, so edits take effect immediately. Shells opened before an edit keep the old functions in memory until you open a new one.
 
 ## License

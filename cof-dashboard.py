@@ -139,8 +139,17 @@ def sha8(s):
     return hashlib.sha256(s.encode()).hexdigest()[:8]
 
 
+def primary_dir():
+    return Path(os.environ.get("CLAUDE_OVERFLOW_PRIMARY_DIR") or HOME / ".claude")
+
+
+def primary_cred():
+    """Like the loader's _cof_primary_cred: the macOS Keychain entry, or the credentials file elsewhere."""
+    return "Claude Code-credentials" if sys.platform == "darwin" else str(primary_dir() / ".credentials.json")
+
+
 def accounts():
-    rows = [{"label": "primary", "dir": str(HOME / ".claude"), "cred": "Claude Code-credentials",
+    rows = [{"label": "primary", "dir": str(primary_dir()), "cred": primary_cred(),
              "email": primary_email(), "primary": True}]
     try:
         with open(ACCOUNTS, newline="") as f:
@@ -161,8 +170,9 @@ def profile_email(d):
 
 
 def primary_email():
-    try:
-        return json.load(open(HOME / ".claude.json")).get("oauthAccount", {}).get("emailAddress", "")
+    try:   # like _cof_primary_state: the default dir keeps its state file in $HOME, a custom one inside itself
+        f = HOME / ".claude.json" if primary_dir() == HOME / ".claude" else primary_dir() / ".claude.json"
+        return json.load(open(f)).get("oauthAccount", {}).get("emailAddress", "")
     except Exception:  # noqa: BLE001
         return ""
 
@@ -573,7 +583,7 @@ def token_scan():
             except Exception:  # noqa: BLE001
                 cache = {}
             files = []
-            for p in (HOME / ".claude" / "projects").rglob("*.jsonl"):
+            for p in (primary_dir() / "projects").rglob("*.jsonl"):
                 try:
                     stt = p.stat()
                 except OSError:

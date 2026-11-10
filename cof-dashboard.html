@@ -450,6 +450,7 @@ function renderPies() {
   S.accounts.forEach((a, i) => {
     const cell = $("pa-" + i), u = acctUsage(a, "w"), s5 = acctUsage(a, "s"), sc = acctUsage(a, "sc");
     const wk = (a.limits || []).find(l => l.kind === "weekly_all");
+    const scOf = esc((a.limits || []).find(l => l.kind === "weekly_scoped")?.scope || scName);   // the model this account's scoped window is for
     if (!u.known) {
       pie(cell.querySelector(".pie-slot"), [{ name: "unknown", value: 1, color: "var(--grid)", tip: `<div class="h">${esc(a.label)}</div>${a.state === "dead" ? "signed out" : "no usage data yet"}` }], 116);
       cell.querySelector(".pie-num").textContent = a.state === "dead" ? "signed out" : "?";
@@ -457,12 +458,12 @@ function renderPies() {
     }
     const tip = `<div class="h">${esc(a.label)} · ${esc(a.email || "")}${u.cached ? " (cached " + rel(a.fetched_at) + ")" : ""}</div>
       <div class="r"><span>weekly, every model</span><b>${u.v}%</b></div><div class="r"><span>5-hour session</span><b>${s5.v}%</b></div>
-      <div class="r"><span>Fable-only weekly</span><b>${sc.v}%</b></div>${wk?.resets_at ? `<div class="r"><span>weekly resets</span><b>${rel(wk.resets_at)}</b></div>` : ""}`;
+      <div class="r"><span>${scOf}-only weekly</span><b>${sc.v}%</b></div>${wk?.resets_at ? `<div class="r"><span>weekly resets</span><b>${rel(wk.resets_at)}</b></div>` : ""}`;
     pie(cell.querySelector(".pie-slot"), [
       { name: "used", value: u.v, color: acctColor(a.label), faded: u.cached, tip },
       { name: "left", value: 100 - u.v, color: "var(--track)", tip }], 116);
     cell.querySelector(".pie-num").textContent = u.v + "%";
-    cell.querySelector(".pie-note").innerHTML = `Fable ${sc.v}%${wk?.resets_at ? ` · resets ${esc(rel(wk.resets_at))}` : ""}${u.cached ? "<br>cached " + esc(rel(a.fetched_at)) : ""}`;
+    cell.querySelector(".pie-note").innerHTML = `${scOf} ${sc.v}%${wk?.resets_at ? ` · resets ${esc(rel(wk.resets_at))}` : ""}${u.cached ? "<br>cached " + esc(rel(a.fetched_at)) : ""}`;
   });
   // second row: the current 5-hour session per account
   const w5 = $("pie-accts5");

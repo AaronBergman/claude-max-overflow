@@ -1,0 +1,37 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  offline:
+    name: offline suites (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install zsh and jq (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq zsh jq
+      - name: Shell syntax (bash and zsh)
+        run: |
+          for f in claude-overflow.sh cof-insession-hook.sh cof-restart.sh setup.sh uninstall.sh claude-on claude-shim tests/*.sh; do
+            bash -n "$f"
+          done
+          zsh -n claude-overflow.sh
+      - name: Python syntax
+        run: python3 -m py_compile cof-dashboard.py cof-context.py cof-mcp.py cof-statusline.py claude-dispatch tools/dashboard-demo.py
+      - name: Binary resolution (every launch reaches the intended account)
+        run: bash tests/test-bin-resolution.sh
+      - name: Soft hop off primary
+        run: bash tests/test-leave-primary.sh
+      - name: Dashboard state on demo data
+        run: COF_DEMO_CHECK=1 python3 tools/dashboard-demo.py
