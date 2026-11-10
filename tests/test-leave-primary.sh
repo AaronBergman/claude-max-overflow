@@ -7,6 +7,7 @@ HOOK="$(cd "$(dirname "$0")/.." && pwd)/cof-insession-hook.sh"
 T=$(mktemp -d)
 trap 'kill $(jobs -p) 2>/dev/null; rm -rf "$T"' EXIT
 pass=0; fail=0
+stamp_ago() { date -v-"$1"M +%Y%m%d%H%M 2>/dev/null || date -d "$1 minutes ago" +%Y%m%d%H%M; }   # touch -t stamp, BSD or GNU date
 
 cat > "$T/stub-loader.sh" <<'EOF'
 CLAUDE_OVERFLOW_SESSION_AT="${CLAUDE_OVERFLOW_SESSION_AT:-85}"
@@ -78,13 +79,13 @@ SETUP=': > tasks/w123abc.output' run_case workflow-running stay $W85 CLAUDE_OVER
 SETUP=': > tasks/w123abc.output; printf "{\n  \"taskId\": \"w123abc\",\n  \"status\": \"completed\"\n}\n" > sess/workflows/wf_1.json' \
   run_case workflow-done hop $W85 CLAUDE_OVERFLOW_INSESSION_LEAVE_PRIMARY=1
 # 10. a workflow output with no end record and nothing written for 2 hours (died with an earlier process): hops
-SETUP=': > tasks/w999.output; touch -t "$(date -v-2H +%Y%m%d%H%M)" tasks/w999.output' \
+SETUP=': > tasks/w999.output; touch -t "$(stamp_ago 120)" tasks/w999.output' \
   run_case workflow-stale hop $W85 CLAUDE_OVERFLOW_INSESSION_LEAVE_PRIMARY=1
 # 11. a background agent wrote to its transcript just now: stays
 SETUP=': > sess/subagents/agent-a1.jsonl; ln -s "$PWD/sess/subagents/agent-a1.jsonl" tasks/a1.output' \
   run_case agent-active stay $W85 CLAUDE_OVERFLOW_INSESSION_LEAVE_PRIMARY=1
 # 12. that agent has been quiet for 20 minutes: hops
-SETUP=': > sess/subagents/agent-a1.jsonl; touch -t "$(date -v-20M +%Y%m%d%H%M)" sess/subagents/agent-a1.jsonl; ln -s "$PWD/sess/subagents/agent-a1.jsonl" tasks/a1.output' \
+SETUP=': > sess/subagents/agent-a1.jsonl; touch -t "$(stamp_ago 20)" sess/subagents/agent-a1.jsonl; ln -s "$PWD/sess/subagents/agent-a1.jsonl" tasks/a1.output' \
   run_case agent-idle hop $W85 CLAUDE_OVERFLOW_INSESSION_LEAVE_PRIMARY=1
 # 13. another Stop hook is continuing this turn: stays
 SHA=true run_case stop-hook-active stay $W85 CLAUDE_OVERFLOW_INSESSION_LEAVE_PRIMARY=1
