@@ -14,7 +14,7 @@
 
 - **One command, many accounts.** `claude` checks live rate limits at launch (5-hour, weekly and model-scoped windows) and starts the session on an account with room. Settings, skills, hooks, plugins, memory and session history are shared, so every account behaves like your primary. [How it works](#how-it-works)
 - **Conversations that don't hit the wall.** When the current account runs out mid-session, the same conversation resumes on another account at the next turn boundary. [Switching accounts mid-conversation](#switching-accounts-mid-conversation)
-- **Logins that stay alive.** Idle overflow accounts are refreshed on a schedule, and one that really needs a new sign-in gets its login page opened for you (right email, private window, verified). [Credential lifecycle](#credential-lifecycle)
+- **Logins that stay alive.** Idle overflow accounts are refreshed on a schedule (the keep-alive that setup offers), and one that really needs a new sign-in gets its login page opened for you (right email, private window, verified). [Credential lifecycle](#credential-lifecycle)
 - **A Claude that knows its budget.** A plugin tells every session which account it is on and what is left everywhere, warns before a big fan-out, and gives Claude `claude-on` and `claude-dispatch` to put work on another account. [claude-router plugin](#claude-knows-about-the-router-claude-router-plugin)
 - **A dashboard.** Usage per account and pooled, where the next launch goes and why, burn rate, hop history and router health. [Dashboard](#dashboard)
 - **One history in claude.ai too.** Sessions that ran on an overflow account are mirrored into your primary's claude.ai. [Seeing overflow sessions in claude.ai](#seeing-overflow-sessions-in-claudeai)
@@ -30,9 +30,9 @@ bash setup.sh        # guided: adds your overflow accounts, wires your shell rc,
 Open a new terminal, then:
 
 ```bash
-claude           # as always; the router picks the account
-climits          # every account's usage, reset times and login state
-claude_router    # the dashboard
+claude                       # as always; the router picks the account
+climits                      # every account's usage, reset times and login state
+claude-overflow dashboard    # the dashboard (setup also links it as claude_router)
 ```
 
 Details: [Requirements](#requirements), [Install](#install), [Commands and tuning](#commands), [FAQ](#faq), [Uninstall](#uninstall).
