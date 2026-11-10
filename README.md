@@ -1,5 +1,7 @@
 # claude-max-overflow
 
+[![tests](https://github.com/AaronBergman/claude-max-overflow/actions/workflows/test.yml/badge.svg)](https://github.com/AaronBergman/claude-max-overflow/actions/workflows/test.yml)
+
 **A router for Claude Code across several Claude Max subscriptions** (also known as the Claude router; its plugin and dashboard are called `claude-router`). You keep typing `claude`. One **primary** account owns all your configuration; any number of **overflow** accounts add capacity. Each launch goes to an account with headroom, a conversation that runs its account dry moves itself to another one and carries on, and Claude itself is told how much is left on every account.
 
 ![The dashboard on made-up data: pooled and per-account usage, where the next launch goes, headroom, burn rate and a week of history](docs/dashboard.png)
